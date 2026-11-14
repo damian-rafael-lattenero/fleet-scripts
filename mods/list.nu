@@ -65,3 +65,65 @@ export def cartesian [other: list<any>]: list<any> -> list<list<any>> {
     let left: list<any> = $in
     $left | each {|a| $other | each {|b| [$a, $b]} } | flatten
 }
+
+# ── The list APPLICATIVE (nondeterminism) ─────────────────────────────────
+# In Haskell the list Applicative is combinatorics: <*> takes every function
+# from the left list with every value from the right one.
+
+# <*> for lists: apply every closure in `fs` to every input value.
+export def ap-list [fs: list<closure>]: list<any> -> list<any> {
+    let xs: list<any> = $in
+    $fs | cartesian $xs | each {|pair| do $pair.0 $pair.1}
+}
+
+# liftA2 for lists: combine input and `other` over the FULL cartesian
+# product. lift-a2 (*) [1 2] [10 20] == [10 20 20 40].
+export def lift-a2 [other: list<any>, f: closure]: list<any> -> list<any> {
+    let xs: list<any> = $in
+    $xs | cartesian $other | each {|pair| do $f $pair.0 $pair.1}
+}
+
+# filterM with a list-valued predicate: every choice combination survives —
+# filter-m with both choices is the powerset. Each kept prefix forks into
+# one branch per choice the predicate returns.
+export def filter-m [pred: closure]: list<any> -> list<list<any>> {
+    let xs: list<any> = $in
+    $xs | reduce --fold [[]] {|x, acc|
+        $acc | each {|prefix| (do $pred $x) | each {|choice|
+            if $choice { $prefix | append [$x] } else { $prefix }
+        }} | flatten
+    }
+}
+
+# The powerset: every sublist of the input.
+export def powerset []: list<any> -> list<list<any>> {
+    let xs: list<any> = $in
+    $xs | filter-m {|| [true false]}
+}
+
+# replicateM for lists: n draws from the same nondeterministic choice —
+# replicate-m 3 [0 1] is every 3-bit tuple (test matrices, combos).
+export def replicate-m [n: int, ma: list<any>]: nothing -> list<list<any>> {
+    if $n <= 0 { return [[]] }
+    1..$n | reduce --fold [[]] {|_, acc|
+        $acc | each {|prefix| $ma | each {|x| $prefix | append [$x]} } | flatten
+    }
+}
+
+# ── Pairs (the Bifunctor-on-tuples staples) ──────────────────────────────
+
+# unzip: list of pairs -> two lists.
+export def unzip []: list<list<any>> -> record<first: list<any>, second: list<any>> {
+    let pairs: list<list<any>> = $in
+    {first: ($pairs | each {|p| $p.0}), second: ($pairs | each {|p| $p.1})}
+}
+
+# first for pairs: map the closure over the left element of every pair.
+export def map-fst [f: closure]: list<list<any>> -> list<list<any>> {
+    $in | each {|pair| [(do $f $pair.0), $pair.1]}
+}
+
+# second for pairs: map the closure over the right element of every pair.
+export def map-snd [f: closure]: list<list<any>> -> list<list<any>> {
+    $in | each {|pair| [$pair.0, (do $f $pair.1)]}
+}

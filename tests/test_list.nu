@@ -32,4 +32,24 @@ assert equal ([1 2 3 4] | zip-with [10 20] {|a: int, b: int| $a + $b}) [11 22]
 assert equal ([1 2] | cartesian ["a" "b"]) [[1 a] [1 b] [2 a] [2 b]]
 assert equal ([] | cartesian ["a" "b"]) []
 
+# ── the list applicative ──
+# ap-list: every closure applied to every value
+assert equal ([2 3] | ap-list [{|x: int| $x * 10}, {|x: int| $x + 1}]) [20 30 3 4]
+# lift-a2 over the full cartesian product
+assert equal ([1 2] | lift-a2 [10 20] {|a: int, b: int| $a * $b}) [10 20 20 40]
+# powerset = filter-m with both choices (2^n, prefix-major order)
+assert equal ([1 2] | powerset) [[1 2] [1] [2] []]
+assert equal ([1 2 3] | powerset | length) 8
+# filter-m with a discriminating predicate forks only where the choice forks
+assert equal ([1 2 3] | filter-m {|x: int| if $x == 2 { [true false] } else { [true] } }) [[1 2 3] [1 3]]
+# replicate-m: n draws from the same choice — every 2-bit tuple
+assert equal (replicate-m 2 [0 1]) [[0 0] [0 1] [1 0] [1 1]]
+assert equal (replicate-m 0 [1 2]) [[]]
+assert equal (replicate-m 3 [0 1] | length) 8
+
+# ── pairs ──
+assert equal ([[1 "a"] [2 "b"]] | unzip) {first: [1 2], second: [a b]}
+assert equal ([[1 "a"] [2 "b"]] | map-fst {|x: int| $x * 10}) [[10 a] [20 b]]
+assert equal ([[1 "a"] [2 "b"]] | map-snd {|s: string| $s + "!"}) [[1 "a!"] [2 "b!"]]
+
 print "test_list ok"
