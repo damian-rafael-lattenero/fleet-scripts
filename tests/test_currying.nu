@@ -25,6 +25,12 @@ let minus10b: closure = ([10] | apply-args $minus)
 assert equal (do $minus10b 4) 6
 # uncurry2 inverts curry2 (round-trip law)
 assert equal (do (uncurry2 $minus) 10 3) 7
+# uncurry ladder spot-checks (arity 3, 6, 23 — the last one via arg spread)
+assert equal (do (uncurry3 (curry3 {|a: int, b: int, c: int| $a + $b + $c})) 1 2 3) 6
+assert equal (do (uncurry6 (curry6 {|a: int, b: int, c: int, d: int, e: int, f: int| $a + $b + $c + $d + $e + $f})) 1 2 3 4 5 6) 21
+assert equal (do (uncurry23 (curry23 {|...xs| $xs | math sum})) ...(seq 1 23)) 276
+# round-trip law at arity 5 too: uncurryN . curryN == id
+assert equal (do (uncurry5 (curry5 {|a: int, b: int, c: int, d: int, e: int| $a * 10000 + $b * 1000 + $c * 100 + $d * 10 + $e})) 1 2 3 4 5) 12345
 # papply fixes leading args, rest flow through
 assert equal (do (papply {|a: int, b: int, c: int| $a + $b * $c} 2) 3 4) 14
 # build-record: deferred closures fill the structure field by field
