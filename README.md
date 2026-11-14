@@ -57,11 +57,10 @@ values, and records fill field by field from deferred closures.
 
 | function | type | summary |
 |---|---|---|
-| `curry2` | `f: closure -> closure` | (a, b) -> r becomes a -> b -> r |
-| `curry3` | `f: closure -> closure` | a -> b -> c -> r |
-| `curry4` | `f: closure -> closure` | a -> b -> c -> d -> r |
-| `curry5` | `f: closure -> closure` | a -> b -> c -> d -> e -> r |
-| `uncurry2` | `g: closure -> closure` | inverse of curry2 |
+| `curry2` .. `curry5` | `f: closure -> closure` | hand-written curried() rungs |
+| `curry6` .. `curry23` | `f: closure -> closure` | GENERATED LADDER (scripts/gen-curry.nu), Kotlin ceiling 23 |
+| `apply-args` | `list<any>, c: closure -> any` | apply a curried chain from a list, one do per rung; short list = partial |
+| `uncurry2` | `g: closure -> closure` | inverse of curry2 (round-trip law) |
 | `papply` | `f: closure, ...fixed -> closure` | fix leading args (kap `.with` by value) |
 | `build-record` | `spec: record -> record` | fill record from 0-arg closures (sequential) |
 | `build-record-par` | `spec: record -> record` | same, parallel via par-each (order kept) |
