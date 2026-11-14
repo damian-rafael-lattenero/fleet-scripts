@@ -66,14 +66,26 @@ values, and records fill field by field from deferred closures.
 | `build-record-par` | `spec: record -> record` | same, parallel via par-each (order kept) |
 | `thread` | `x: any, fs: list<closure> -> any` | left-to-right closure pipeline (`>>>`) |
 
+### mods/async.nu — the applicative over background jobs
+
+The kap `.with(Kap { ... })` graph translated: each deferred value is a
+background job that reports to the main mailbox; collection blocks in
+`job recv` (zero polling) and `--timeout` is the failure signal (jobs killed,
+honest error). In-process async — jobs are threads and die with nu.
+
+| function | type | summary |
+|---|---|---|
+| `traverse-jobs` | `list<closure> -> list<any>` | run closures concurrently, collect in structure order |
+| `build-record-jobs` | `record -> record` | fill a record: every field a job, record lands when the last does |
+| `apply-async` | `list<closure>, c: closure -> any` | concurrent deferred args fed into a curried closure (`.with` chain) |
+
 ## Roadmap
 
 - `mods/json.nu` — structured-record lenses: get-in / set-in / update-in /
   deep-merge / dotted-key flattening (jq-style traversal over nushell records).
 - `mods/types.nu` — ADTs as tagged records: Option (some/none), Result
   (ok/err) with map / bind / match (cata) and law tests.
-- `mods/applicative.nu` — traverse over the Result/Option types; error
-  accumulation (kap's Validated pattern); parallel variants beyond
-  build-record-par.
+- Validated-style error accumulation for the async applicative (kap's
+  traverse that collects ALL errors instead of failing on the first).
 - Property tests for the algebraic laws (scanl/unfold duality, span/partition
   recombination, curry/uncurry round-trip).
