@@ -49,6 +49,24 @@ Builtins already provide: map=`each`, filter=`where`, fold=`reduce`,
 | `compose` | `f: closure, g: closure -> closure` | (compose f g) x = g (f x) |
 | `flip` | `f: closure -> closure` | swap the first two arguments |
 
+### mods/currying.nu — kap-style currying & structure filling
+
+Nushell has no native currying, so this module builds it exactly the way kap
+(Kotlin) does: one closure step per argument, partial applications are
+values, and records fill field by field from deferred closures.
+
+| function | type | summary |
+|---|---|---|
+| `curry2` | `f: closure -> closure` | (a, b) -> r becomes a -> b -> r |
+| `curry3` | `f: closure -> closure` | a -> b -> c -> r |
+| `curry4` | `f: closure -> closure` | a -> b -> c -> d -> r |
+| `curry5` | `f: closure -> closure` | a -> b -> c -> d -> e -> r |
+| `uncurry2` | `g: closure -> closure` | inverse of curry2 |
+| `papply` | `f: closure, ...fixed -> closure` | fix leading args (kap `.with` by value) |
+| `build-record` | `spec: record -> record` | fill record from 0-arg closures (sequential) |
+| `build-record-par` | `spec: record -> record` | same, parallel via par-each (order kept) |
+| `thread` | `x: any, fs: list<closure> -> any` | left-to-right closure pipeline (`>>>`) |
+
 ## Roadmap
 
 - `mods/json.nu` — structured-record lenses: get-in / set-in / update-in /
@@ -56,6 +74,7 @@ Builtins already provide: map=`each`, filter=`where`, fold=`reduce`,
 - `mods/types.nu` — ADTs as tagged records: Option (some/none), Result
   (ok/err) with map / bind / match (cata) and law tests.
 - `mods/applicative.nu` — traverse over the Result/Option types; error
-  accumulation (kap's Validated pattern); parallel variants via `par-each`.
+  accumulation (kap's Validated pattern); parallel variants beyond
+  build-record-par.
 - Property tests for the algebraic laws (scanl/unfold duality, span/partition
-  recombination).
+  recombination, curry/uncurry round-trip).
