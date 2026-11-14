@@ -1,4 +1,4 @@
-# nu-fp repo law
+# nushell-fp repo law
 
 - English only in all files: code, names, comments, docs, commits.
 - Typed by law: every `def` carries typed params plus an input/output

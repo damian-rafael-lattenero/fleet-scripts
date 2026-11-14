@@ -27,7 +27,7 @@ export def traverse-jobs [
     let n: int = ($fs | length)
     if $n == 0 { return [] }
     let ids: list<int> = ($fs | enumerate | each {|row|
-        job spawn --description "nu-fp traverse" {
+        job spawn --description "nushell-fp traverse" {
             {i: $row.index, v: (do $row.item)} | job send 0 --tag ($row.index + 1)
         }
     })
@@ -36,7 +36,7 @@ export def traverse-jobs [
             job recv --timeout $timeout
         } catch {
             $ids | each {|id| job kill $id} | ignore
-            error make {msg: "nu-fp traverse-jobs: timeout — a job never finished"}
+            error make {msg: "nushell-fp traverse-jobs: timeout — a job never finished"}
         }
     })
     $msgs | sort-by i | get v

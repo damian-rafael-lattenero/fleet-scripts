@@ -1,5 +1,5 @@
 #!/usr/bin/env nu
-# test.nu — gate for the nu-fp library: nu-check every module, then run every
+# test.nu — gate for the nushell-fp library: nu-check every module, then run every
 # tests/*.nu script. Failing modules/scripts are reported by name.
 
 const SELF: path = (path self)

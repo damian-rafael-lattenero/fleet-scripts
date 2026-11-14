@@ -1,4 +1,4 @@
-# nu-fp
+# nushell-fp
 
 Functional-programming library for nushell 0.117+: Haskell-style list
 combinators, higher-order combinators over first-class closures, and (growing)
@@ -10,7 +10,7 @@ function here covers it, `use` it instead of hand-rolling.
 ## Usage
 
 ```nu
-use ~/Projects/nu-fp/mods/list.nu *
+use ~/Projects/nushell-fp/mods/list.nu *
 [1 2 3] | intersperse 0
 # => [1 0 2 0 3]
 ```
@@ -18,7 +18,7 @@ use ~/Projects/nu-fp/mods/list.nu *
 Run the gate (must be ALL GREEN before any commit):
 
 ```nu
-nu ~/Projects/nu-fp/test.nu
+nu ~/Projects/nushell-fp/test.nu
 ```
 
 ## Index
