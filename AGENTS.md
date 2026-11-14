@@ -13,4 +13,8 @@
   enters a module. Confirmed traps get a note in the module header.
 - Tests mandatory: every exported function has an assertion in `tests/`;
   `nu test.nu` must print ALL GREEN before a commit.
+- The README index is part of the definition of done: every new module or
+  function ships its README row in the SAME commit. (Lesson: a module without
+  its index row is invisible to the brain RAG — a missing human-num row read
+  as an indexer bug for an hour.)
 - Commit + push per logical unit.
