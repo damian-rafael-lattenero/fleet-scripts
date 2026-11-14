@@ -110,6 +110,12 @@ in traverse-option / fold-result.
 | `fold-result` | `list, closure, init -> record` | foldM: first err stops the fold |
 | `traverse-validated` | `list, closure -> record` | ACCUMULATES every error, in input order |
 
+### mods/fmt.nu — display formatting
+
+| function | type | summary |
+|---|---|---|
+| `human-num` | `x: int -> string` | the raw -> K -> M ladder (American system); M fires AT the boundary — 1000000 is "1M", never "1000K"; trailing zeros trimmed |
+
 ### mods/json.nu — lenses over structured records
 
 Built on the 0.117 machinery (`merge deep` IS deep-merge), filling what
@@ -137,6 +143,15 @@ honest error). In-process async — jobs are threads and die with nu.
 | `traverse-jobs` | `list<closure> -> list<any>` | run closures concurrently, collect in structure order |
 | `build-record-jobs` | `record -> record` | fill a record: every field a job, record lands when the last does |
 | `apply-async` | `list<closure>, c: closure -> any` | concurrent deferred args fed into a curried closure (`.with` chain) |
+
+## Examples
+
+- `examples/agents-dashboard.nu` — the daily cross-session agent check: 355
+  metadata.json read as PARALLEL JOBS, git branches per repo as a second
+  concurrent wave, builtin `join`, `get-in` nested access, and a pretty
+  parsed render (dates humanized, tokens on the K/M ladder). Also the
+  crucible that hardened traverse-jobs: crashed elements report through
+  the mailbox — no silent deadlocks.
 
 ## Deliberately NOT translated (and why)
 
