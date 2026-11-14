@@ -28,7 +28,17 @@ export def traverse-jobs [
     if $n == 0 { return [] }
     let ids: list<int> = ($fs | enumerate | each {|row|
         job spawn --description "nushell-fp traverse" {
-            {i: $row.index, v: (do $row.item)} | job send 0 --tag ($row.index + 1)
+            # A crashed element must STILL report — otherwise the collector
+            # blocks on its missing message until --timeout. Learned live:
+            # 355 agent metadata files, one missing field, a silent hang.
+            # The error rides the same mailbox and rethrows after collection,
+            # by element index.
+            let outcome: any = (try {
+                {i: $row.index, v: (do $row.item)}
+            } catch {|e|
+                {i: $row.index, v: null, error: ($e.msg)}
+            })
+            $outcome | job send 0 --tag ($row.index + 1)
         }
     })
     let msgs: list<any> = (1..$n | each {|_|
@@ -39,7 +49,12 @@ export def traverse-jobs [
             error make {msg: "nushell-fp traverse-jobs: timeout — a job never finished"}
         }
     })
-    $msgs | sort-by i | get v
+    let sorted: list<any> = ($msgs | sort-by i)
+    let crashed: list<any> = ($sorted | where {|m| $m.error? != null})
+    if not ($crashed | is-empty) {
+        error make {msg: ("nushell-fp traverse-jobs: element " + (($crashed | first).i | into string) + " failed: " + (($crashed | first).error))}
+    }
+    $sorted | get v
 }
 
 # Concurrent record filling: every field closure runs as a job; the record

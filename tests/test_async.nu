@@ -9,6 +9,10 @@ assert equal ([{|| 10}, {|| 20}, {|| 30}] | traverse-jobs) [10 20 30]
 assert equal ([{|| sleep 200ms; 2}, {|| 1}] | traverse-jobs) [2 1]
 # empty input is the empty list
 assert equal ([] | traverse-jobs) []
+# a crashed element reports through the mailbox — no silent hang, honest
+# error naming the element index (learned live: the 355-file agent hang)
+let exploded: any = (try { [{|| 1}, {|| error make {msg: "boom element"}}, {|| 3}] | traverse-jobs } catch {|e| $e.msg})
+assert equal $exploded "nushell-fp traverse-jobs: element 1 failed: boom element"
 # record filling runs all fields concurrently
 assert equal ({a: {|| 1}, b: {|| 2}} | build-record-jobs) {a: 1, b: 2}
 # a slow field still fills — the record waits for the last one
