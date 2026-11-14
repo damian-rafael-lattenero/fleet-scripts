@@ -110,6 +110,21 @@ in traverse-option / fold-result.
 | `fold-result` | `list, closure, init -> record` | foldM: first err stops the fold |
 | `traverse-validated` | `list, closure -> record` | ACCUMULATES every error, in input order |
 
+### mods/json.nu — lenses over structured records
+
+Built on the 0.117 machinery (`merge deep` IS deep-merge), filling what
+builtins cannot do: paths that only exist at RUNTIME, n-fold layering, and
+the dotted-key flattening round-trip.
+
+| function | type | summary |
+|---|---|---|
+| `get-in` | `record, path: list<any>, default -> any` | runtime path walk (ints index lists); default on any miss |
+| `set-in` | `record, path: list<string>, value -> record` | nested write, creates missing levels, path wins over non-records |
+| `update-in` | `record, path: list<string>, f: closure -> record` | transform at a path; missing = no-op |
+| `deep-merge-all` | `list<record> -> record` | the config stack: defaults \| user \| env (n-fold merge deep) |
+| `flatten-keys` | `record -> record` | {a: {b: 1}} -> {"a.b": 1}; lists are leaves |
+| `unflatten-keys` | `record -> record` | the inverse; round-trip law pinned |
+
 ### mods/async.nu — the applicative over background jobs
 
 The kap `.with(Kap { ... })` graph translated: each deferred value is a
@@ -137,8 +152,6 @@ honest error). In-process async — jobs are threads and die with nu.
 
 ## Roadmap
 
-- `mods/json.nu` — structured-record lenses: get-in / set-in / update-in /
-  deep-merge / dotted-key flattening (jq-style traversal over nushell records).
 - Validated variant over records (field names in the error list).
 - Property tests with random inputs (the kap Kotest style) beyond the pinned
   law samples.
