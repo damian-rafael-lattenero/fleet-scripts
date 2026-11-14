@@ -39,6 +39,13 @@ Builtins already provide: map=`each`, filter=`where`, fold=`reduce`,
 | `unfold` | `seed, closure -> list<any>` | anamorphism: step returns {emit, next} or null |
 | `zip-with` | `list<any>, other: list<any>, closure -> list<any>` | zipWith, truncates at shorter |
 | `cartesian` | `list<any>, other: list<any> -> list<list<any>>` | cartesian product as [a, b] pairs |
+| `ap-list` | `list<any>, fs: list<closure> -> list<any>` | <*> for lists: every closure x every value |
+| `lift-a2` | `list<any>, other, closure -> list<any>` | liftA2 over the full cartesian product |
+| `filter-m` | `list<any>, pred: closure -> list<list<any>>` | filterM: one branch per predicate choice |
+| `powerset` | `list<any> -> list<list<any>>` | every sublist (2^n) |
+| `replicate-m` | `n: int, ma: list<any> -> list<list<any>>` | n draws from one choice: all tuples |
+| `unzip` | `list<list<any>> -> record<first, second>` | pairs -> two lists |
+| `map-fst` / `map-snd` | `list<list<any>>, closure -> list<list<any>>` | Bifunctor first/second over pairs |
 
 ### mods/combinators.nu — first-class closures
 
@@ -57,14 +64,51 @@ values, and records fill field by field from deferred closures.
 
 | function | type | summary |
 |---|---|---|
-| `curry2` .. `curry5` | `f: closure -> closure` | hand-written curried() rungs |
-| `curry6` .. `curry23` | `f: closure -> closure` | GENERATED LADDER (scripts/gen-curry.nu), Kotlin ceiling 23 |
+| `curry2` .. `curry23` | `fn: closure -> closure` | the curried() ladder, GENERATED (scripts/gen-curry.nu), Kotlin ceiling 23 |
+| `uncurry2` .. `uncurry23` | `fn: closure -> closure` | the inverse ladder, same generator (round-trip laws pinned) |
 | `apply-args` | `list<any>, c: closure -> any` | apply a curried chain from a list, one do per rung; short list = partial |
-| `uncurry2` | `g: closure -> closure` | inverse of curry2 (round-trip law) |
 | `papply` | `f: closure, ...fixed -> closure` | fix leading args (kap `.with` by value) |
 | `build-record` | `spec: record -> record` | fill record from 0-arg closures (sequential) |
 | `build-record-par` | `spec: record -> record` | same, parallel via par-each (order kept) |
 | `thread` | `x: any, fs: list<closure> -> any` | left-to-right closure pipeline (`>>>`) |
+
+### mods/algebra.nu — Semigroup/Monoid as operation dictionaries
+
+Typeclasses encode as records {empty, combine}; the laws (associativity,
+identity) are test-pinned the way kap's LAWS.md pins them.
+
+| function | type | summary |
+|---|---|---|
+| `monoid` | `empty: any, combine: closure -> record` | build a monoid dictionary |
+| `fold-map` | `list<any>, f: closure, m: record -> any` | THE Foldable star: map into the monoid, combine |
+| `mconcat` | `list<any>, m: record -> any` | combine a whole list (fold-map id) |
+| `monoid-sum` / `monoid-product` | `-> record` | numbers under + / * |
+| `monoid-str` / `monoid-list` | `-> record` | strings / lists under concat |
+| `monoid-any` / `monoid-all` | `-> record` | booleans under or / and |
+
+### mods/types.nu — Option/Result ADTs (tagged records)
+
+Uniform shape {tag, value} (and error for Result), law battery mirroring
+kap's LAWS.md. The kap ruling holds: traverse-validated accumulates ALL
+errors (applicative) and is intentionally NOT a monad; short-circuit lives
+in traverse-option / fold-result.
+
+| function | type | summary |
+|---|---|---|
+| `some` / `none` | `-> record<tag, value>` | Maybe constructors |
+| `option-map` / `option-bind` | `record, closure -> record` | fmap / (>>=) |
+| `option-match` | `record, 2 closures -> any` | the eliminator (cata) |
+| `option-unwrap-or` / `option-or` | `record -> any/record` | fallback / Alternative (<\|>) |
+| `option-guard` | `bool -> record` | branch cutter (comprehension filter) |
+| `option-join` / `option-compose` | `-> record/closure` | join / kleisli (<=<) |
+| `traverse-option` | `list, closure -> record` | first none collapses; later elements untouched |
+| `sequence-option` | `list<record> -> record` | list-of-Options -> Option-of-list |
+| `ok` / `err` | `-> record<tag, value, error>` | Either constructors |
+| `result-map` / `result-map-err` / `result-bimap` | `record, closure -> record` | map success / failure / both |
+| `result-bind` / `result-compose` / `result-join` | `record -> record/closure` | (>>=) / (<=<) / join |
+| `result-match` / `result-unwrap-or` / `result-or` | `record -> any` | cata / fallback / Alternative |
+| `fold-result` | `list, closure, init -> record` | foldM: first err stops the fold |
+| `traverse-validated` | `list, closure -> record` | ACCUMULATES every error, in input order |
 
 ### mods/async.nu — the applicative over background jobs
 
@@ -79,13 +123,22 @@ honest error). In-process async — jobs are threads and die with nu.
 | `build-record-jobs` | `record -> record` | fill a record: every field a job, record lands when the last does |
 | `apply-async` | `list<closure>, c: closure -> any` | concurrent deferred args fed into a curried closure (`.with` chain) |
 
+## Deliberately NOT translated (and why)
+
+- **Comonad / Arrow** — need laziness or a typed arrow category; a shell has
+  neither, and the encoding would be ceremony without the guarantees.
+- **MonadTrans / MTL (Reader/State/Error)** — nushell effects are closures +
+  pipeline input; `thread` + `papply` + tagged records already cover the
+  composition the transformers solve in Haskell.
+- **`forever`** — the reactive law: no unbounded loops; use job spawn + recv
+  (see async.nu) or LaunchAgents for long-lived work.
+- **`when` / `unless` / `void`** — already idiomatic one-liners (`if $cond
+  { do $body }`, `each {|| null}`); wrapping builtins is against repo law.
+
 ## Roadmap
 
 - `mods/json.nu` — structured-record lenses: get-in / set-in / update-in /
   deep-merge / dotted-key flattening (jq-style traversal over nushell records).
-- `mods/types.nu` — ADTs as tagged records: Option (some/none), Result
-  (ok/err) with map / bind / match (cata) and law tests.
-- Validated-style error accumulation for the async applicative (kap's
-  traverse that collects ALL errors instead of failing on the first).
-- Property tests for the algebraic laws (scanl/unfold duality, span/partition
-  recombination, curry/uncurry round-trip).
+- Validated variant over records (field names in the error list).
+- Property tests with random inputs (the kap Kotest style) beyond the pinned
+  law samples.
