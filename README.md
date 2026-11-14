@@ -131,6 +131,19 @@ the dotted-key flattening round-trip.
 | `flatten-keys` | `record -> record` | {a: {b: 1}} -> {"a.b": 1}; lists are leaves |
 | `unflatten-keys` | `record -> record` | the inverse; round-trip law pinned |
 
+### mods/prop.nu — property-based testing (the PBT recipe, mechanical)
+
+Nushell's `random` is NOT seedable (0.117), so generators are PURE functions
+of an explicit int seed — determinism is exact: a failing seed replays the
+same counterexample. Shrinking reports the SMALLEST still-failing case.
+
+| function | type | summary |
+|---|---|---|
+| `gen-int` | `seed: int, --min, --max -> int` | deterministic int from a seed (LCG mixing) |
+| `gen-list-int` | `seed: int, --max-len -> list<int>` | random-length list; empty/singleton live in the space |
+| `shrink-list` | `xs: list<int> -> list<list<int>>` | smaller candidates, smallest-first |
+| `for-all` | `gen: closure, prop: closure, --runs, --seed -> record` | ok/err with the shrunk counterexample |
+
 ### mods/async.nu — the applicative over background jobs
 
 The kap `.with(Kap { ... })` graph translated: each deferred value is a
