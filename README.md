@@ -161,6 +161,20 @@ honest error). In-process async — jobs are threads and die with nu.
 
 ## Examples
 
+- `examples/hello-applicative.nu` — the concurrency theorem LIVE: 5 deferred
+  hellos sleeping 1..5s; sequential pays the SUM (15s), traverse-jobs and
+  apply-async pay the MAX (5s) with structure order restored.
+- `examples/fibonacci-unfold.nu` — the Haskell unfoldr classic: fibonacci
+  as an anamorphism (the stop condition lives IN the step), plus the
+  recurrence law checked along the row.
+- `examples/run-length-encoding.nu` — the Exercism classic span-driven:
+  encode with span, decode with replicate, and the round-trip law pinned.
+- `examples/phone-keypad.nu` — LeetCode 17, the list-APPLICATIVE showcase:
+  lift-a2 (cartesian) folded over digit choices = sequenceA; unit law for
+  no digits, honest collapse for unknown ones.
+- `examples/option-chain.nu` — the Scala for-comprehension over Options
+  desugared: option-bind chains, option-guard as the filter,
+  option-compose as kleisli, boundary parsed once (get -o).
 - `examples/config-validation.nu` — the REAL railway case: validators as
   pure Result functions, error ACCUMULATION (traverse-validated names every
   broken field in order), default layering (deep-merge-all), runtime reads
