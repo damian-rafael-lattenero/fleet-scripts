@@ -68,8 +68,8 @@ values, and records fill field by field from deferred closures.
 | `uncurry2` .. `uncurry23` | `fn: closure -> closure` | the inverse ladder, same generator (round-trip laws pinned) |
 | `apply-args` | `list<any>, c: closure -> any` | apply a curried chain from a list, one do per rung; short list = partial |
 | `papply` | `f: closure, ...fixed -> closure` | fix leading args (kap `.with` by value) |
-| `build-record` | `spec: record -> record` | fill record from 0-arg closures (sequential) |
-| `build-record-par` | `spec: record -> record` | same, parallel via par-each (order kept) |
+| `build-record` | `record -> record` (pipeline) | fill record from 0-arg closures (sequential) |
+| `build-record-par` | `record -> record` (pipeline) | same, parallel via par-each (order kept); field failures re-raise AFTER the stream naming every failed field (nushell #16083) |
 | `thread` | `x: any, fs: list<closure> -> any` | left-to-right closure pipeline (`>>>`) |
 
 ### mods/algebra.nu — Semigroup/Monoid as operation dictionaries
@@ -153,8 +153,8 @@ honest error). In-process async — jobs are threads and die with nu.
 
 | function | type | summary |
 |---|---|---|
-| `traverse-jobs` | `list<closure> -> list<any>` | run closures concurrently, collect in structure order |
-| `build-record-jobs` | `record -> record` | fill a record: every field a job, record lands when the last does |
+| `traverse-jobs` | `list<closure> -> list<any>` | run closures concurrently, collect in structure order; EVERY failed element named; per-call random tag isolates the shared mailbox (a killed job's dying catch-send cannot poison the next call) |
+| `build-record-jobs` | `record -> record` | fill a record: every field a job, record lands when the last does; empty record is `{}` |
 | `apply-async` | `list<closure>, c: closure -> any` | concurrent deferred args fed into a curried closure (`.with` chain) |
 
 ## Examples
