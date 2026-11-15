@@ -16,6 +16,10 @@
 #                    structure exists (sequential).
 #   build-record-par — same graph, evaluated in parallel via par-each
 #                    (par-each preserves input order — verified 0.117.0).
+#                    Field errors are caught per-field and re-raised AFTER
+#                    the stream: raised inside par-each they ride the
+#                    ListStream and escape try/catch across a module
+#                    boundary (nushell #16083, measured live).
 #
 # Mechanics verified live on nushell 0.117.0: closures accept rest params,
 # `do $f ...$args` spreads a stored list into the call, closures nest
@@ -33,19 +37,45 @@ export def apply-args [c: closure]: list<any> -> any {
     $in | reduce --fold $c {|x, acc| do $acc $x}
 }
 
-# Applicative record building: every field of `spec` is a 0-arg closure;
-# evaluate each and return the filled record. Errors surface from the field
-# that fails, first to last.
-export def build-record [spec: record]: nothing -> record {
+# Applicative record building: every field is a 0-arg closure; evaluate each
+# and return the filled record. Errors surface from the field that fails,
+# first to last. Pipeline input, like the rest of the family.
+export def build-record []: record -> record {
+    let spec: record = $in
+    if ($spec | columns | is-empty) { return {} }
     $spec | items {|k, f| {key: $k, value: (do $f)}} | transpose -r -d
 }
 
 # Same applicative building, fields evaluated in parallel. par-each keeps
 # input order, so the result record matches build-record exactly.
-export def build-record-par [spec: record]: nothing -> record {
-    $spec | items {|k, f| {key: $k, f: $f}}
-    | par-each {|row| {key: $row.key, value: (do $row.f)}}
-    | transpose -r -d
+# ERROR LAW (nushell #16083): an error raised INSIDE par-each rides the
+# ListStream and escapes the caller's try/catch once it crosses a module
+# boundary — measured live. So each field is caught here, carried as a
+# value, and failures re-raise AFTER the stream, naming EVERY failed field
+# in input order (the accumulation law).
+export def build-record-par []: record -> record {
+    let spec: record = $in
+    if ($spec | columns | is-empty) { return {} }
+    # par-each does NOT guarantee output order (measured live: with errors,
+    # arrival order leaked through) — index + sort-by restores structure
+    # order for BOTH the record and the failure report.
+    let outcomes: list<record> = ($spec
+        | items {|k, f| {key: $k, f: $f}}
+        | enumerate
+        | par-each {|row|
+            try {
+                {i: $row.index, key: $row.item.key, value: (do $row.item.f), error: null}
+            } catch {|e|
+                {i: $row.index, key: $row.item.key, value: null, error: ($e.msg)}
+            }
+        })
+    let ordered: list<record> = ($outcomes | sort-by i)
+    let bad: list<record> = ($ordered | where {|o| $o.error != null})
+    if not ($bad | is-empty) {
+        let detail: string = ($bad | each {|o| $"($o.key): ($o.error)"} | str join "; ")
+        error make {msg: $"nushell-fp build-record-par: failed fields — ($detail)"}
+    }
+    $ordered | select key value | transpose -r -d
 }
 
 # Left-to-right pipeline: thread x through every unary closure in `fs`

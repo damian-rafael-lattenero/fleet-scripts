@@ -2,6 +2,7 @@
 use std/assert
 use ../mods/list.nu *
 
+# ── basics: construction, splitting, folding ─────────────────────────────
 # replicate
 assert equal (replicate 3 "x") [x x x]
 assert equal (replicate 0 "x") []
@@ -32,7 +33,7 @@ assert equal ([1 2 3 4] | zip-with [10 20] {|a: int, b: int| $a + $b}) [11 22]
 assert equal ([1 2] | cartesian ["a" "b"]) [[1 a] [1 b] [2 a] [2 b]]
 assert equal ([] | cartesian ["a" "b"]) []
 
-# ── the list applicative ──
+# ── the list applicative ─────────────────────────────────────────────────
 # ap-list: every closure applied to every value
 assert equal ([2 3] | ap-list [{|x: int| $x * 10}, {|x: int| $x + 1}]) [20 30 3 4]
 # lift-a2 over the full cartesian product
@@ -47,7 +48,7 @@ assert equal (replicate-m 2 [0 1]) [[0 0] [0 1] [1 0] [1 1]]
 assert equal (replicate-m 0 [1 2]) [[]]
 assert equal (replicate-m 3 [0 1] | length) 8
 
-# ── pairs ──
+# ── pairs ────────────────────────────────────────────────────────────────
 assert equal ([[1 "a"] [2 "b"]] | unzip) {first: [1 2], second: [a b]}
 assert equal ([[1 "a"] [2 "b"]] | map-fst {|x: int| $x * 10}) [[10 a] [20 b]]
 assert equal ([[1 "a"] [2 "b"]] | map-snd {|s: string| $s + "!"}) [[1 "a!"] [2 "b!"]]

@@ -9,6 +9,9 @@
 # position; the main thread blocks in `job recv` (zero polling) and structure
 # order is restored by sorting on the index. `--timeout` is the failure
 # signal: on expiry every spawned job is killed and the error is honest.
+# Calls are isolated by a per-call random tag: a killed job's dying catch
+# can still deliver its outcome (kill races the send), and the tag keeps
+# that stale message away from every later call (see traverse-jobs).
 #
 # Verified live on 0.117.0: closure capture into spawned jobs, mailbox FIFO,
 # out-of-order arrival restored by index, staggered completion, timeout+kill.
@@ -26,6 +29,14 @@ export def traverse-jobs [
     let fs: list<closure> = $in
     let n: int = ($fs | length)
     if $n == 0 { return [] }
+    # MAILBOX ISOLATION LAW: the process mailbox is shared, and job kill
+    # races the job's dying catch — an interrupted job can still package the
+    # interrupt as an error and `job send` it before the thread dies
+    # (measured live: a stale "0: Operation interrupted" poisoned the NEXT
+    # call). One random tag per CALL: every job of this call sends with it,
+    # the collector filters by it, foreign messages are never consumed.
+    # Element order rides the body's i field.
+    let callTag: int = (random int 1..1000000000)
     let ids: list<int> = ($fs | enumerate | each {|row|
         job spawn --description "nushell-fp traverse" {
             # A crashed element must STILL report — otherwise the collector
@@ -38,21 +49,26 @@ export def traverse-jobs [
             } catch {|e|
                 {i: $row.index, v: null, error: ($e.msg)}
             })
-            $outcome | job send 0 --tag ($row.index + 1)
+            $outcome | job send 0 --tag $callTag
         }
     })
     let msgs: list<any> = (1..$n | each {|_|
         try {
-            job recv --timeout $timeout
+            job recv --tag $callTag --timeout $timeout
         } catch {
-            $ids | each {|id| job kill $id} | ignore
+            # killing an already-exited job errors — never let that replace
+            # the honest timeout error
+            $ids | each {|id| try { job kill $id } } | ignore
             error make {msg: "nushell-fp traverse-jobs: timeout — a job never finished"}
         }
     })
     let sorted: list<any> = ($msgs | sort-by i)
+    # EVERY crashed element is named, in structure order — dropping later
+    # ones hides how many things actually failed (accumulation law).
     let crashed: list<any> = ($sorted | where {|m| $m.error? != null})
     if not ($crashed | is-empty) {
-        error make {msg: ("nushell-fp traverse-jobs: element " + (($crashed | first).i | into string) + " failed: " + (($crashed | first).error))}
+        let detail: string = ($crashed | each {|m| $"($m.i): ($m.error)"} | str join "; ")
+        error make {msg: $"nushell-fp traverse-jobs: failed elements — ($detail)"}
     }
     $sorted | get v
 }
@@ -64,8 +80,15 @@ export def build-record-jobs [
     --timeout: duration = 5min
 ]: record -> record {
     let spec: record = $in
+    if ($spec | columns | is-empty) { return {} }
     let ks: list<string> = ($spec | columns)
-    let vs: list<any> = ($spec | values | traverse-jobs --timeout $timeout)
+    # traverse-jobs errors name element indexes (= field order here); prefix
+    # the record context so the failure reads in the caller's terms
+    let vs: list<any> = (try {
+        $spec | values | traverse-jobs --timeout $timeout
+    } catch {|e|
+        error make {msg: $"nushell-fp build-record-jobs: ($e.msg)"}
+    })
     $ks | zip $vs | each {|pair| {key: $pair.0, value: $pair.1}} | transpose -r -d
 }
 
