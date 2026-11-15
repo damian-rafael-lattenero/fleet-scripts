@@ -20,9 +20,14 @@ assert equal ([1 2] | span {|it| true}) {taken: [1 2], rest: []}
 # partition
 assert equal ([1 2 3 4] | partition {|it| $it mod 2 == 0}) {yes: [2 4], no: [1 3]}
 assert equal ([] | partition {|it| true}) {yes: [], no: []}
+# partition split law: yes ++ no is a PERMUTATION of the input (sorted equal)
+let part4: record<yes: list<int>, no: list<int>> = ([4 1 3 2] | partition {|it| $it mod 2 == 0})
+assert equal ($part4.yes | append $part4.no | sort) ([4 1 3 2] | sort)
 # scanl — running sums, inclusive of init
 assert equal ([1 2 3] | scanl {|acc: int, it: int| $acc + $it} 0) [0 1 3 6]
 assert equal ([] | scanl {|acc: int, it: int| $acc + $it} 7) [7]
+# THE scanl law: its last element IS the fold (holds for the empty list too)
+assert equal ([1 2 3 4] | scanl {|acc: int, it: int| $acc + $it} 0 | last) ([1 2 3 4] | reduce --fold 0 {|it, acc| $acc + $it})
 # unfold — corecursion, null stops
 assert equal (unfold 1 {|s: int| if $s > 4 { null } else { {emit: $s, next: ($s + 1)} } }) [1 2 3 4]
 assert equal (unfold 9 {|s: int| null }) []
@@ -47,6 +52,19 @@ assert equal ([1 2 3] | filter-m {|x: int| if $x == 2 { [true false] } else { [t
 assert equal (replicate-m 2 [0 1]) [[0 0] [0 1] [1 0] [1 1]]
 assert equal (replicate-m 0 [1 2]) [[]]
 assert equal (replicate-m 3 [0 1] | length) 8
+
+# ── classic laws over builtins + gaps ────────────────────────────────────
+# map fusion (free theorem): each f (each g xs) == each (f . g) xs
+# (closures to builtins stay untyped — each declares its param as any and
+#  0.117 enforces the exact match)
+assert equal ([1 2 3] | each {|x| $x * 2} | each {|x| $x + 1}) ([1 2 3] | each {|x| ($x * 2) + 1})
+# reverse is an involution (builtin, pinned as a law)
+assert equal ([1 2 3] | reverse | reverse) [1 2 3]
+# span split law: taken ++ rest == the original list
+let spanL: record<taken: list<int>, rest: list<int>> = ([5 1 3 2] | span {|it| $it > 3})
+assert equal ($spanL.taken | append $spanL.rest) [5 1 3 2]
+# the list applicative obeys identity: pure id <*> xs == xs
+assert equal ([1 2 3] | ap-list [{|x| $x}]) [1 2 3]
 
 # ── pairs ────────────────────────────────────────────────────────────────
 assert equal ([[1 "a"] [2 "b"]] | unzip) {first: [1 2], second: [a b]}

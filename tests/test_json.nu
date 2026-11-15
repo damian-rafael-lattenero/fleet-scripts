@@ -60,4 +60,24 @@ assert equal ($deep | flatten-keys | unflatten-keys) $deep
 let wide: record = {bot: {token: "t", chat: 42}, fork: {model: "glm"}}
 assert equal ($wide | flatten-keys | unflatten-keys) $wide
 
+# ── lens laws over get-in/set-in (Gibbons naming: well-behaved = GetSet
+#    + SetGet; "very well-behaved" adds SetSet) ───────────────────────────
+let lensS: record = {db: {host: "h", port: 1}, flag: true}
+# GetSet (PutGet): get (set v s) == v — reading back what you wrote
+assert equal ($lensS | set-in [db port] 99 | get-in [db port] null) 99
+# SetGet (GetPut): set (get s) s == s — writing what you read changes nothing
+assert equal ($lensS | set-in [db host] ($lensS | get-in [db host] null)) $lensS
+# SetSet (PutPut): set v2 (set v1 s) == set v2 s — the last write wins
+assert equal ($lensS | set-in [db port] 1 | set-in [db port] 42) ($lensS | set-in [db port] 42)
+
+# ── deep-merge-all is associative — grouping layers never matters, only
+#    the order WITHIN a stack ──────────────────────────────────────────────
+let la: record = {db: {host: "a"}}
+let lb: record = {db: {host: "b", port: 2}}
+let lc: record = {db: {port: 3}, extra: true}
+let ab: record = ([$la $lb] | deep-merge-all)
+let bc: record = ([$lb $lc] | deep-merge-all)
+assert equal ([$ab $lc] | deep-merge-all) ([$la $bc] | deep-merge-all)
+assert equal ([$ab $lc] | deep-merge-all) {db: {host: "b", port: 3}, extra: true}
+
 print "test_json ok"

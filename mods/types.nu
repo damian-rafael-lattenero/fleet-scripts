@@ -41,6 +41,15 @@ export def option-bind [f: closure]: record<tag: string, value: any> -> record<t
     if $o.tag == "some" { do $f $o.value } else { $o }
 }
 
+# (<*>) for Option (pure = some): apply an Option-wrapped closure to an
+# Option-wrapped value; none in EITHER position collapses to none. With it,
+# the four applicative laws (identity, composition, homomorphism,
+# interchange) are test-pinned the way the functor/monad laws are.
+export def option-ap [x: record<tag: string, value: any>]: record<tag: string, value: any> -> record<tag: string, value: any> {
+    let f: record<tag: string, value: any> = $in
+    if $f.tag == "some" and $x.tag == "some" { some (do $f.value $x.value) } else { none }
+}
+
 # The eliminator (cata): run on-some on the value, on-none otherwise.
 export def option-match [onSome: closure, onNone: closure]: record<tag: string, value: any> -> any {
     let o: record<tag: string, value: any> = $in
@@ -130,6 +139,14 @@ export def result-bimap [onOk: closure, onErr: closure]: record<tag: string, val
 export def result-bind [f: closure]: record<tag: string, value: any, error: any> -> record<tag: string, value: any, error: any> {
     let r: record<tag: string, value: any, error: any> = $in
     if $r.tag == "ok" { do $f $r.value } else { $r }
+}
+
+# (<*>) for Result (pure = ok): apply a Result-wrapped closure to a
+# Result-wrapped value. The FUNCTION position's error wins first — the
+# applicative evaluation order the laws assume.
+export def result-ap [x: record<tag: string, value: any, error: any>]: record<tag: string, value: any, error: any> -> record<tag: string, value: any, error: any> {
+    let f: record<tag: string, value: any, error: any> = $in
+    if $f.tag == "err" { $f } else if $x.tag == "err" { $x } else { ok (do $f.value $x.value) }
 }
 
 # The eliminator: on-ok on the value, on-err on the error.
