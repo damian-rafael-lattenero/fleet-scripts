@@ -26,6 +26,24 @@ let mul3: closure = {|x: int| some ($x * 3)}
 assert equal ((some 4 | option-bind $add1) | option-bind $mul3) (some 4 | option-bind {|x: int| do $add1 $x | option-bind $mul3})
 assert equal ((some 4 | option-bind $add1) | option-bind $mul3) (some 15)
 
+# ── Option: applicative laws (<*> = option-ap, pure = some) ──────────────
+# identity: pure id <*> v == v
+assert equal ((some {|x: int| $x}) | option-ap (some 5)) (some 5)
+assert equal ((some {|x| $x}) | option-ap (none)) (none)
+# homomorphism: pure f <*> pure x == pure (f x)
+assert equal ((some {|x: int| $x + 1}) | option-ap (some 4)) (some 5)
+# interchange: u <*> pure y == pure ($ y) <*> u
+let appU: record<tag: string, value: any> = (some {|x: int| $x * 3})
+assert equal ($appU | option-ap (some 5)) ((some {|f: closure| do $f 5}) | option-ap $appU)
+# composition (concrete witnesses): pure (.) <*> u <*> v <*> w == u <*> (v <*> w)
+let appF: record<tag: string, value: any> = (some {|x: int| $x + 1})
+let appG: record<tag: string, value: any> = (some {|x: int| $x * 10})
+let appW: record<tag: string, value: any> = (some 2)
+assert equal ($appF | option-ap ($appG | option-ap $appW)) (some 21)
+# none collapses in BOTH positions — the shape the laws demand
+assert equal ((none) | option-ap (some 5)) (none)
+assert equal ((some {|x: int| $x}) | option-ap (none)) (none)
+
 # ── Option: the rest of the interface ────────────────────────────────────
 assert equal (some 5 | option-match {|x: int| $"got ($x)"} {|| "nothing"}) "got 5"
 assert equal (none | option-match {|x| "got"} {|| "nothing"}) "nothing"
@@ -70,6 +88,20 @@ assert equal (ok 7 | result-bind {|x: int| ok $x}) (ok 7)
 assert equal ((ok 4 | result-bind $okAdd1) | result-bind $okMul3) (ok 4 | result-bind {|x: int| do $okAdd1 $x | result-bind $okMul3})
 # bind short-circuits on err
 assert equal (err "stop" | result-bind {|x: int| ok ($x + 1)}) (err "stop")
+
+# ── Result: applicative laws (<*> = result-ap, pure = ok) ────────────────
+# identity
+assert equal ((ok {|x: int| $x}) | result-ap (ok 5)) (ok 5)
+# homomorphism
+assert equal ((ok {|x: int| $x + 1}) | result-ap (ok 4)) (ok 5)
+# interchange
+let rapU: record<tag: string, value: any, error: any> = (ok {|x: int| $x * 3})
+assert equal ($rapU | result-ap (ok 5)) ((ok {|f: closure| do $f 5}) | result-ap $rapU)
+# composition (concrete witnesses): f after g, both sides agree
+assert equal ((ok {|x: int| $x + 1}) | result-ap ((ok {|x: int| $x * 10}) | result-ap (ok 2))) (ok 21)
+# the FUNCTION position's error wins first (evaluation order)
+assert equal ((err "f-first") | result-ap (err "x-second")) (err "f-first")
+assert equal ((ok {|x: int| $x}) | result-ap (err "x-err")) (err "x-err")
 assert equal (ok 5 | result-match {|x: int| $"ok=($x)"} {|e: string| $"err=($e)"}) "ok=5"
 assert equal (err "bad" | result-match {|x| "ok"} {|e: string| $"err=($e)"}) "err=bad"
 assert equal (err "bad" | result-unwrap-or 0) 0

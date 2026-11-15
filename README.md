@@ -97,6 +97,7 @@ in traverse-option / fold-result.
 |---|---|---|
 | `some` / `none` | `-> record<tag, value>` | Maybe constructors |
 | `option-map` / `option-bind` | `record, closure -> record` | fmap / (>>=) |
+| `option-ap` | `record, record -> record` | (<*>): Option closure x Option value; none in either collapses (4 applicative laws test-pinned) |
 | `option-match` | `record, 2 closures -> any` | the eliminator (cata) |
 | `option-unwrap-or` / `option-or` | `record -> any/record` | fallback / Alternative (<\|>) |
 | `option-guard` | `bool -> record` | branch cutter (comprehension filter) |
@@ -106,6 +107,7 @@ in traverse-option / fold-result.
 | `ok` / `err` | `-> record<tag, value, error>` | Either constructors |
 | `result-map` / `result-map-err` / `result-bimap` | `record, closure -> record` | map success / failure / both |
 | `result-bind` / `result-compose` / `result-join` | `record -> record/closure` | (>>=) / (<=<) / join |
+| `result-ap` | `record, record -> record` | (<*>): Result closure x Result value; the FUNCTION position's error wins first (applicative evaluation order) |
 | `result-match` / `result-unwrap-or` / `result-or` | `record -> any` | cata / fallback / Alternative |
 | `fold-result` | `list, closure, init -> record` | foldM: first err stops the fold |
 | `traverse-validated` | `list, closure -> record` | ACCUMULATES every error, in input order |
@@ -159,6 +161,10 @@ honest error). In-process async — jobs are threads and die with nu.
 
 ## Examples
 
+- `examples/config-validation.nu` — the REAL railway case: validators as
+  pure Result functions, error ACCUMULATION (traverse-validated names every
+  broken field in order), default layering (deep-merge-all), runtime reads
+  (get-in), and the GetSet lens law as the runtime sanity gate.
 - `examples/agents-dashboard.nu` — the daily cross-session agent check: 355
   metadata.json read as PARALLEL JOBS, git branches per repo as a second
   concurrent wave, builtin `join`, `get-in` nested access, and a pretty
