@@ -131,4 +131,32 @@ assert equal ([-1 2 -3] | traverse-validated $validate) (err ["negative: -1" "ne
 # accumulation vs short-circuit: same shape, two semantics
 assert equal ([-1 2 -3] | traverse-option {|x: int| if $x > 0 { some $x } else { none }}) (none)
 
+# ── Result: attempt — the bridge from the impure world ──────────────────
+# a clean body becomes ok(value)
+assert equal (attempt {|| 'clean' }) (ok 'clean')
+# a nu error becomes err(msg) — never thrown at the caller's face
+let bad: record = (attempt {|| error make {msg: 'boom'} })
+assert equal ($bad.tag) 'err'
+assert equal (($bad.error | str contains 'boom')) true
+# a FAILING external is err (the exit-code message); a good one is ok(stdout,
+# trailing newline trimmed by nu's capture)
+assert equal ((attempt {|| ^false }).tag) 'err'
+assert equal (attempt {|| ^echo hello }) (ok 'hello')
+# it composes with the existing monad: attempt -> bind -> match, no try/catch anywhere
+let chain: record = (attempt {|| 'v' } | result-bind {|v: string| ok ($v + '!') })
+assert equal ($chain | result-match {|v: string| $v } {|e: string| 'failed' }) 'v!'
+# error classification: read the message, branch on it — the caller decides
+let classified: string = (attempt {|| ^false } | result-match {|v| 'ok path' } {|e: string|
+    if (($e | str contains 'non-zero')) { 'exit-code failure' } else { 'other' }
+})
+assert equal $classified 'exit-code failure'
+# the field idiom from 16/11: nu's rm RAISES on a missing path — attempt turns
+# that crash into a tagged value the caller can branch on instead of guarding
+let missing: record = (attempt {|| rm -r /tmp/attempt-probe-missing-dir })
+assert equal ($missing.tag) 'err'
+assert equal (($missing.error | str contains 'ot found')) true
+# a successful delete lands in ok
+mkdir /tmp/attempt-probe-dir
+assert equal ((attempt {|| rm -r /tmp/attempt-probe-dir }).tag) 'ok'
+
 print "test_types ok"

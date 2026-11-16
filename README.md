@@ -105,6 +105,7 @@ in traverse-option / fold-result.
 | `traverse-option` | `list, closure -> record` | first none collapses; later elements untouched |
 | `sequence-option` | `list<record> -> record` | list-of-Options -> Option-of-list |
 | `ok` / `err` | `-> record<tag, value, error>` | Either constructors |
+| `attempt` | `closure -> record<tag, value, error>` | THE bridge from the impure world: run an unsafe closure (file ops, externals, anything that can raise), catch ANY error into the Result ADT; composes onward with result-bind/map-err/match — the one place try/catch is allowed |
 | `result-map` / `result-map-err` / `result-bimap` | `record, closure -> record` | map success / failure / both |
 | `result-bind` / `result-compose` / `result-join` | `record -> record/closure` | (>>=) / (<=<) / join |
 | `result-ap` | `record, record -> record` | (<*>): Result closure x Result value; the FUNCTION position's error wins first (applicative evaluation order) |

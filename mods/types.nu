@@ -117,6 +117,17 @@ export def err [e: any]: nothing -> record<tag: string, value: any, error: any> 
     {tag: "err", value: null, error: $e}
 }
 
+# The bridge from the impure world: run an UNSAFE closure and catch ANY error
+# into the Result ADT. This is the one place try/catch is allowed — after it,
+# the value is a plain Result and every step composes with result-map/bind/
+# match (no more `if (path exists)` guards or inline try/catch around effects).
+#
+#   attempt {|| rm -r $target }   # => ok(null) | err("External command had a
+#                                 #    non-zero exit code")
+export def attempt [body: closure]: nothing -> record<tag: string, value: any, error: any> {
+    try { ok (do $body) } catch {|e| err $e.msg }
+}
+
 # fmap for Result on the success channel.
 export def result-map [f: closure]: record<tag: string, value: any, error: any> -> record<tag: string, value: any, error: any> {
     let r: record<tag: string, value: any, error: any> = $in
