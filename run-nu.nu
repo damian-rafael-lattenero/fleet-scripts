@@ -113,7 +113,17 @@ def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, se
 def brain-suggest [sig: string]: nothing -> list<string> {
     if ($sig | str trim | is-empty) { return [] }
     if not ($BRAIN | path exists) { return [] }
-    let r: record<exit_code: int, stdout: string, stderr: string> = (^$BRAIN query $"nushell: ($sig)" --k 2 | complete)
+    # hard deadline (fleet audit 17/11): suggestions are a bonus — a wedged
+    # brain must never stall the shared gate. Tagged mailbox + job kill
+    # (stale-mailbox law: the tag isolates this call's message).
+    let tag: int = (random int 1..100000)
+    let id: int = (job spawn --description 'run-nu brain suggest' {
+        ^$BRAIN query $"nushell: ($sig)" --k 2 | complete | job send 0 --tag $tag
+    })
+    let r: record = (try { job recv --tag $tag --timeout 4sec } catch {
+        job kill $id
+        {exit_code: 124, stdout: '', stderr: 'deadline exceeded'}
+    })
     if $r.exit_code != 0 { return [] }
     let parsed: any = (try { $r.stdout | from json } catch { return [] })
     if ($parsed.hits? | is-empty) { return [] }
