@@ -9,10 +9,12 @@
 #                    returning false — measured); parse traps die here.
 #   2. LINT        — static rules over the source, ALL findings
 #                    accumulated (never one-at-a-time):
-#                      self-truncate  open X | ... | save -f X   ERROR (data loss, measured)
-#                      midword-$      bare token like gui/$uid    WARN  (no interpolation mid-word)
-#                      quoted-tilde   '~/path' strings            WARN  (no expansion inside strings)
-#                      blind-sleep    sleep >= 10sec              WARN  (the reactive law)
+#                      self-truncate   open X | ... | save -f X (literal X)      ERROR (data loss, measured)
+#                      self-overwrite  open X | ... | save -f X same line, ANY token incl. $var — ERROR (the gate-invisible variant, audit 17/11)
+#                      path-type-bug   `path type` compared to ""                WARN  (0.117 type error, measured on retire-python)
+#                      midword-$       bare token like gui/$uid    WARN  (no interpolation mid-word)
+#                      quoted-tilde    '~/path' strings            WARN  (no expansion inside strings; print labels exempt)
+#                      blind-sleep     sleep >= 10sec              WARN  (the reactive law)
 #   3. RUN         — unless blocked or --no-run; timed, stderr captured.
 #   4. SUGGEST     — brain RAG (hybrid retrieval) for the fatal error and
 #                    up to two lint findings; the curated KB surfaces the
@@ -84,10 +86,11 @@ def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, se
 
     # rule: quoted-tilde — '~...' never expands inside quotes. Print LABELS
     # are exempt: a literal tilde in human-readable output is documentation,
-    # not a path (measured on the bot deploy scripts).
+    # not a path (measured on the bot deploy scripts; audit 17/11 noted the
+    # exemption missed mid-line prints — contains, not starts-with).
     let f3: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
         | where {|row| ($row.text | parse --regex "'([^']*~[^']*)'" | length) > 0}
-        | where {|row| not ($row.text | str trim | str starts-with 'print')}
+        | where {|row| not ($row.text | str trim | str contains 'print')}
         | each {|row|
             {line: $row.line, kind: "quoted-tilde", severity: "WARN",
              msg: "single-quoted string contains ~ — it will NOT expand",
@@ -104,7 +107,38 @@ def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, se
              msg: $"sleep of (($r.secs | first))sec — a blind long wait",
              hint: "reactive law: job send/recv with --timeout, watch, or an event — never blind sleep"}})
 
-    $findings | append $f1 | append $f2 | append $f3 | append $f4 | sort-by line
+    # rule: self-overwrite — open X | ... | save -f X in the SAME pipeline line
+    # where X is ANY token (literal path OR $var): save -f truncates before the
+    # lazy open read completes (measured data loss 15/11); the $var variant
+    # ducked under the literal-only self-truncate rule (audit 17/11: the
+    # "gate-invisible variant").
+    let f5: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
+        | each {|row|
+            let opens: list<string> = ($row.text | parse --regex 'open\s+(?:--raw\s+)?(\$?[\w./~-]+)' | each {|p| $p.capture0 })
+            let saves: list<string> = ($row.text | parse --regex 'save\s+(?:--raw\s+)?(?:-f\s+)?(\$?[\w./~-]+)' | each {|p| $p.capture0 })
+            let overlap: list<string> = ($opens | where {|o| $o in $saves})
+            if ($overlap | is-empty) {
+                null
+            } else {
+                {line: $row.line, kind: "self-overwrite", severity: "ERROR",
+                 msg: $"same pipeline opens and saves \(save -f) '($overlap | str join ", ")' — non-atomic self-overwrite",
+                 hint: "write to a temp file then mv — save -f truncates before the lazy open read completes (measured data loss)"}
+            }
+        }
+        | where {|f| $f != null})
+
+    # rule: path-type-bug — `path type` compared against an empty string: it
+    # returns null or a type name, never "" (on 0.117 the comparison is a
+    # type-mismatch error — measured on the bot's retire-python).
+    let f6: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
+        | where {|row| ($row.text | parse --regex 'path type\) != ""' | length) > 0}
+        | each {|row|
+            {line: $row.line, kind: "path-type-bug", severity: "WARN",
+             msg: "`path type` compared against \"\" — it returns null or a type name, never an empty string",
+             hint: "compare == \"file\" or wrap in try — on 0.117 this comparison is a type-mismatch error"}
+        })
+
+    $findings | append $f1 | append $f2 | append $f3 | append $f4 | append $f5 | append $f6 | sort-by line
 }
 
 # ── brain suggestions (hybrid retrieval, JSON parsed natively) ───────────
