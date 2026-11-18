@@ -9,6 +9,7 @@ assert equal (highlight-language /tmp/sample.NU) "nu"
 assert equal (highlight-language /tmp/sample.py) "py"
 assert equal (highlight-language /tmp/sample) ""
 assert equal (highlight-language /tmp/sample.nu "py") "py"
+assert equal (highlight-language /tmp/sample.nu "PY") "py"
 assert equal (highlight-language /tmp/sample.nu "") "nu"
 
 # Nushell route: nu-highlight emits ANSI from the active palette
@@ -29,5 +30,9 @@ assert ($py_out | str contains $ESC)
 # piped input with an explicit language
 let piped_out: string = ("let x = 1" | hl -l nu)
 assert ($piped_out | str contains $ESC)
+
+# unknown language: no highlighter, no error, code passes through unchanged
+assert equal (highlight-text "" "plain") "plain"
+assert equal ("plain" | hl) "plain"
 
 print "test_highlight ok"

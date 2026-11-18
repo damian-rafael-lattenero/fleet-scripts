@@ -10,7 +10,7 @@
 # path extension, else "".
 export def highlight-language [path?: path, explicit?: string]: nothing -> string {
     if ($explicit | is-not-empty) {
-        $explicit
+        $explicit | str lowercase
     } else if ($path | is-not-empty) {
         $path | path parse | get extension | default "" | str lowercase
     } else {
@@ -19,14 +19,18 @@ export def highlight-language [path?: path, explicit?: string]: nothing -> strin
 }
 
 # Highlight a string for the terminal; bat is required off-Nushell.
+# An empty language means "no highlighter known": return the code unchanged.
 export def highlight-text [language: string, code: string]: nothing -> string {
-    if $language in ["nu" "nushell"] {
+    let lang: string = $language | str lowercase
+    if $lang in ["nu" "nushell"] {
         $code | nu-highlight
+    } else if ($lang | is-empty) {
+        $code
     } else {
         if (which bat | is-empty) {
             error make {msg: "hl: bat is required for non-Nushell languages (brew install bat)"}
         }
-        $code | ^bat --plain --color=always --theme=ansi --language $language
+        $code | ^bat --plain --color=always --theme=ansi --language $lang
     }
 }
 
