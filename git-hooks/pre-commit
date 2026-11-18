@@ -1,0 +1,10 @@
+#!/bin/sh
+# THE HOUSE'S SECRETS GATE (audit item 4): the STAGED diff only, values
+# redacted. Canonical file — every repo's scripts/git-hooks/pre-commit is a
+# symlink here (the send-telegram lesson: one source, never copies).
+#
+# Activate it ONCE per clone (local config, not committed):
+#   git config core.hooksPath scripts/git-hooks
+#
+# A hook that cannot run must NEVER pass silently: a missing gitleaks exits 1.
+exec /Users/lattenero/.local/bin/nu-nightly /Users/lattenero/Scripts/secret-scan.nu "$(git rev-parse --show-toplevel)" --staged

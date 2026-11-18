@@ -1,0 +1,71 @@
+# The house's ONE gitleaks config (audit item 4: the secrets gate).
+#
+# Installed as ~/.config/gitleaks/gitleaks.toml -> this file (a symlink, the
+# house's single-source pattern). Default rules carry the whole corpus; the
+# allowlists below are the LOCAL, DOCUMENTED non-secrets:
+#
+#  - the compose DSN brain:brain is the documented LOCAL credential;
+#  - agent-brain's redaction fixture (ServerReadyTest asserts /health never
+#    leaks that literal; its history keeps the string);
+#  - generated/vendor trees (build outputs, third-party inventory, bundled
+#    agents) — never hand-edited, nothing to fix there;
+#  - TEST/FIXTURE trees: the ZCode fork vendors the whole upstream test
+#    suite, whose fixtures are full of fake keys ("e2e-fixture-key",
+#    "user-api-key", token-shaped samples). TRADE-OFF, stated plainly: the
+#    gate's job is production code + infra; our OWN tests keep the inline
+#    `// gitleaks:allow` discipline when they need a literal. A real key
+#    pasted into a vendored test would slip — reviewed by the history sweep's
+#    high-signal rules (aws/github/private-key) which DO cover those paths.
+title = "zcode-house"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "local-only dev credentials declared in the compose files (brain/brain is the documented local DSN)"
+regexTarget = "match"
+regexes = [
+  '''postgres(?:ql)?://brain:brain@''',
+]
+
+[[allowlists]]
+description = "agent-brain's redaction fixture: ServerReadyTest asserts /health NEVER leaks this literal"
+regexTarget = "match"
+regexes = [
+  '''s3cret-that-must-never-leak''',
+]
+
+[[allowlists]]
+description = "generated and vendored trees: build outputs, third-party inventory, bundled agents"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.gradle/''',
+  '''(^|/)\.kotlin/''',
+  '''(^|/)build/''',
+  '''(^|/)dist/''',
+  '''(^|/)out/''',
+  '''(^|/)\.worktrees/''',
+  '''(^|/)third-party/''',
+  '''(^|/)bundled-agents/''',
+]
+
+[[allowlists]]
+description = "design/analysis docs that QUOTE truncated shapes on purpose: a bare prefix and an example response ending in ..."
+regexTarget = "line"
+regexes = [
+  '''(?i)credential prefix: mcp:oauth:''',
+  '''"token": "[^"]*\.\.\."''',
+]
+
+[[allowlists]]
+description = "test and fixture trees (vendored upstream suites full of fake keys; see the header's trade-off)"
+paths = [
+  '''(^|/)test/''',
+  '''(^|/)tests/''',
+  '''\.test\.[tj]sx?$''',
+  '''\.spec\.[tj]sx?$''',
+  '''\.e2e\.[tj]s$''',
+  '''wdio\.conf\.ts$''',
+  '''(^|/)fixtures?/''',
+  '''(^|/)scripts/test-''',
+]
