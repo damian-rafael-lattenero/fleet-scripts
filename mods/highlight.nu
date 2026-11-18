@@ -93,9 +93,58 @@ export def structured-output-text [text: string, kind: string]: nothing -> strin
     }
 }
 
+# ── Palette: color_config shapes -> SGR ───────────────────────────────
+# The skeleton must be colored even when piped, but `ansi` cannot be used:
+# in a non-TTY session it returns "" and its --escape form mangles style
+# strings (measured 0.117.0). So a shape like "purple_bold" maps to its SGR
+# here; unknown or hex shapes render unstyled instead of failing.
+
+def lookup [table: record, key: string]: nothing -> any {
+    try { $table | get $key } catch { null }
+}
+
+def palette [shape: string]: nothing -> string {
+    if ($shape | is-empty) { return "" }
+    try { $env.config.color_config | get $shape | to text } catch { "" }
+}
+
+# Map one color_config shape to an SGR sequence (attributes first, then the
+# color, matching nu-highlight's own ordering).
+export def shape-escape [shape: any]: nothing -> string {
+    if not ((($shape | describe) | str starts-with "string")) { return "" }
+    let words: list<string> = ($shape | split row "_" | where {|word: any| $word | is-not-empty })
+    if ($words | is-empty) { return "" }
+    let colors: record = {black: 30, red: 31, green: 32, yellow: 33, blue: 34, purple: 35, magenta: 35, cyan: 36, white: 37}
+    let bright: record = {black: 90, red: 91, green: 92, yellow: 93, blue: 94, purple: 95, magenta: 95, cyan: 96, white: 97}
+    let attrs: record = {bold: 1, dimmed: 2, dim: 2, italic: 3, underline: 4, blink: 5, reverse: 7}
+    mut attr_codes: list<int> = []
+    mut color_codes: list<int> = []
+    mut light: bool = false
+    for word in $words {
+        if $word == "light" { $light = true; continue }
+        let color: any = (if $light { lookup $bright $word } else { lookup $colors $word })
+        if ($color | is-not-empty) {
+            $color_codes = ($color_codes | append $color)
+            $light = false
+            continue
+        }
+        let attr: any = (lookup $attrs $word)
+        if ($attr | is-not-empty) { $attr_codes = ($attr_codes | append $attr) }
+    }
+    let codes: list<int> = ($attr_codes | append $color_codes)
+    if ($codes | is-empty) { return "" }
+    $"\u{1b}[($codes | str join ';')m"
+}
+
+def styled [shape: string, text: string]: nothing -> string {
+    let escape: string = (shape-escape (palette $shape))
+    if ($escape | is-empty) { return $text }
+    $escape + $text + "\u{1b}[0m"
+}
+
 # ── Display tree: one ADT, one catamorphism, many algebras ────────────
 # Every Nushell value is classified ONCE into this sum type (tagged records):
-#   {tag: "scalar", text}            numbers, bools, null, dates, durations,
+#   {tag: "scalar", text, shape}     numbers, bools, null, dates, durations,
 #                                    filesizes, binaries, ranges… as NUON text
 #   {tag: "text",   text}            plain single-line string
 #   {tag: "json",   text}            string holding embedded JSON / JSONL
@@ -113,13 +162,18 @@ export def structured-output-text [text: string, kind: string]: nothing -> strin
 const PAD: string = "  "
 
 # Conservative Nu-code detector: a declaration head, an external head, or a
-# pipe combined with a variable. Prose and log lines stay plain.
+# pipeline that actually speaks Nu (a bare `a | b` of prose stays plain).
 def looks-like-nu [text: string]: nothing -> bool {
     let trimmed: string = ($text | str trim)
     if ($trimmed | is-empty) { return false }
     let head: string = ($trimmed | split row " " | first)
     let declarations: list<string> = ["let" "mut" "def" "use" "alias" "source" "export" "if" "for" "while" "print"]
-    ($head in $declarations) or ($head | str starts-with "^") or (($trimmed | str contains '$') and ($trimmed | str contains " | "))
+    let pipeline_words: list<string> = ["complete" "get " "lines" "where " "each " "select " "sort-by" "str " "to text" "to json" "to nuon" "from json" "into " "open " "save " "ignore" "print " "reduce" "update " "insert " "reject " "compact"]
+    let is_declaration: bool = ($head in $declarations)
+    let is_external: bool = ($head | str starts-with "^")
+    let is_variable_pipeline: bool = (($trimmed | str contains '$') and ($trimmed | str contains " | "))
+    let is_nu_pipeline: bool = (($trimmed | str contains " | ") and ($pipeline_words | any {|word: any| $trimmed | str contains $word }))
+    $is_declaration or $is_external or $is_variable_pipeline or $is_nu_pipeline
 }
 
 # Prefix every line of a (possibly ANSI-colored) block.
@@ -149,13 +203,28 @@ def classify-string [text: string]: nothing -> record {
     {tag: "text", text: $text}
 }
 
+# The palette shape for a scalar follows its type, so numbers, bools, dates
+# and binaries each keep the color Nushell gives them.
+def scalar-shape [description: string]: nothing -> string {
+    if ($description | str starts-with "int") { return "shape_int" }
+    if ($description | str starts-with "float") { return "shape_float" }
+    if ($description | str starts-with "bool") { return "shape_bool" }
+    if ($description | str starts-with "nothing") { return "shape_nothing" }
+    if ($description | str starts-with "binary") { return "shape_binary" }
+    if ($description | str starts-with "range") { return "shape_range" }
+    if ($description | str starts-with "datetime") { return "shape_datetime" }
+    "shape_literal"
+}
+
 # Scalar fallback is total: NUON for anything serializable, `describe` for
 # values NUON cannot render (closures, custom values).
 def classify-scalar [value: any]: nothing -> record {
+    let description: string = ($value | describe)
+    let shape: string = (scalar-shape $description)
     try {
-        {tag: "scalar", text: ($value | to nuon)}
+        {tag: "scalar", text: ($value | to nuon), shape: $shape}
     } catch {
-        {tag: "scalar", text: ($value | describe)}
+        {tag: "scalar", text: $description, shape: $shape}
     }
 }
 
@@ -182,11 +251,12 @@ export def classify-display []: any -> record {
 
 # ── The eliminator: catamorphism over the Tree ────────────────────────
 # algebra = one closure per constructor:
-#   scalar/text/json/code/lines : |text: string| -> A
+#   scalar/text/json/code/lines : |node| -> A
 #   record                      : |fields: list<{key, node, value: A}>| -> A
 #   list                        : |items: list<{node, value: A}>| -> A
-# The parent receives each child's folded value; nodes that decide layout
-# also see the child node itself (a paramorphism by construction).
+# A leaf handler receives its whole node (tag, text, shape); a product
+# handler receives each child's folded value plus the child node itself, so
+# layout decisions stay in the algebra (a paramorphism by construction).
 export def fold-tree [tree: record, algebra: record]: nothing -> any {
     let tag: string = $tree.tag
     if $tag == "record" {
@@ -204,7 +274,7 @@ export def fold-tree [tree: record, algebra: record]: nothing -> any {
         return (do $handler $items)
     }
     let handler: closure = ($algebra | get $tag)
-    do $handler $tree.text
+    do $handler $tree
 }
 
 # A leaf that renders as a block (its own lines): embedded JSON always, code
@@ -219,31 +289,36 @@ def block-node? [node: record]: nothing -> bool {
 
 def render-algebra []: nothing -> record {
     {
-        "scalar": {|text: any| $text }
-        "text": {|text: any| $text | to nuon }
-        "json": {|text: any|
-            let kind: string = (structured-output-kind $text)
+        "scalar": {|node: any| styled $node.shape $node.text }
+        "text": {|node: any| styled "shape_string" ($node.text | to nuon) }
+        "json": {|node: any|
+            let kind: string = (structured-output-kind $node.text)
             let language: string = (if $kind == "jsonl" { "json" } else { $kind })
-            highlight-text $language (structured-output-text $text $kind)
+            highlight-text $language (structured-output-text $node.text $kind)
         }
-        "code": {|text: any| try { highlight-text "nu" $text } catch { $text } }
-        "lines": {|text: any| $text | str trim --right }
+        "code": {|node: any| try { highlight-text "nu" $node.text } catch { $node.text } }
+        "lines": {|node: any| $node.text | str trim --right }
         "record": {|fields: any|
-            if ($fields | is-empty) { "{}" } else {
+            let open: string = (styled "shape_record" "{")
+            let close: string = (styled "shape_record" "}")
+            if ($fields | is-empty) { $open + $close } else {
                 let body: list<string> = ($fields | each {|field: any|
+                    let label: string = ($PAD + (styled "shape_string" (render-key $field.key)))
                     if (block-node? $field.node) {
-                        $PAD + (render-key $field.key) + ":" + (char nl) + (indent-lines $field.value ($PAD + $PAD))
+                        $label + ":" + (char nl) + (indent-lines $field.value ($PAD + $PAD))
                     } else {
-                        $PAD + (render-key $field.key) + ": " + (shift-continuation $field.value $PAD)
+                        $label + ": " + (shift-continuation $field.value $PAD)
                     }
                 })
-                "{" + (char nl) + ($body | str join (char nl)) + (char nl) + "}"
+                $open + (char nl) + ($body | str join (char nl)) + (char nl) + $close
             }
         }
         "list": {|items: any|
-            if ($items | is-empty) { "[]" } else {
+            let open: string = (styled "shape_record" "[")
+            let close: string = (styled "shape_record" "]")
+            if ($items | is-empty) { $open + $close } else {
                 let body: list<string> = ($items | each {|item: any| (indent-lines $item.value $PAD) })
-                "[" + (char nl) + ($body | str join (char nl)) + (char nl) + "]"
+                $open + (char nl) + ($body | str join (char nl)) + (char nl) + $close
             }
         }
     }
@@ -253,11 +328,11 @@ def render-algebra []: nothing -> record {
 
 def has-block-algebra []: nothing -> record {
     {
-        "scalar": {|_text: any| false }
-        "text": {|_text: any| false }
-        "json": {|_text: any| true }
-        "lines": {|_text: any| true }
-        "code": {|text: any| ($text | str contains (char nl)) }
+        "scalar": {|_node: any| false }
+        "text": {|_node: any| false }
+        "json": {|_node: any| true }
+        "lines": {|_node: any| true }
+        "code": {|node: any| ($node.text | str contains (char nl)) }
         "record": {|fields: any| ($fields | any {|field: any| $field.value }) }
         "list": {|items: any| ($items | any {|item: any| $item.value }) }
     }

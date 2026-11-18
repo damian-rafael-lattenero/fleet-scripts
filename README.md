@@ -141,6 +141,7 @@ highlighted. Verified on nu 0.117.0 with bat 0.26.1.
 | `hl` | `--language (-l): string, ...paths: path -> string` | highlight files, or the piped input when no paths |
 | `structured-output-kind` | `text: string -> string` | "json" / "jsonl" / "csv" / "tsv" / "" (conservative, no prose guessing) |
 | `structured-output-text` | `text: string, kind: string -> string` | pretty-print JSON (2 spaces); other kinds pass through |
+| `shape-escape` | `shape: any -> string` | color_config shape ("purple_bold") -> SGR; `ansi` is unusable off-TTY (returns "" and `--escape` mangles strings) |
 | `classify-display` | `any -> record` | parse any value ONCE into the display ADT (tagged records; record/list recurse, strings split into text/json/code/lines) |
 | `fold-tree` | `tree: record, algebra: record -> any` | the catamorphism: recursion lives here, each constructor has its own closure; render/expandable are algebras |
 | `expandable-leaf?` | `any -> bool` | trigger: does the value carry a structured string leaf? |

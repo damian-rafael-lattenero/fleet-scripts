@@ -51,9 +51,17 @@ let pretty: string = (structured-output-text '{"a":1}' "json")
 assert equal $pretty ('{' + (char nl) + '  "a": 1' + (char nl) + '}')
 assert equal (structured-output-text "x: 1" "yaml") "x: 1"
 
-# render-expanded: layout is pinned for a small tree (quoted single-line leaf)
+# shape-escape: a color_config shape becomes SGR (attributes first, color last)
+assert equal (shape-escape "green") "\u{1b}[32m"
+assert equal (shape-escape "purple_bold") "\u{1b}[1;35m"
+assert equal (shape-escape "light_cyan") "\u{1b}[96m"
+assert equal (shape-escape "cyan_bold") "\u{1b}[1;36m"
+assert equal (shape-escape "") ""
+assert equal (shape-escape 42) ""
+
+# render-expanded: layout is pinned (ANSI stripped) for a small tree
 let tree: record = {user: {name: "ana", tags: ["x" "y"]}, ok: true}
-assert equal ($tree | render-expanded) (
+assert equal ($tree | render-expanded | ansi strip) (
     '{' + (char nl) +
     '  user: {' + (char nl) +
     '    name: "ana"' + (char nl) +
@@ -65,12 +73,13 @@ assert equal ($tree | render-expanded) (
     '  ok: true' + (char nl) +
     '}'
 )
-assert equal ({} | render-expanded) "{}"
-assert equal ([] | render-expanded) "[]"
+assert equal ({} | render-expanded | ansi strip) "{}"
+assert equal ([] | render-expanded | ansi strip) "[]"
+assert (($tree | render-expanded) | str contains $ESC)
 
 # multi-line text becomes real lines, not escaped ones
 let block_text: string = ("line one" + (char nl) + "line two")
-assert equal ({output: $block_text} | render-expanded) (
+assert equal ({output: $block_text} | render-expanded | ansi strip) (
     '{' + (char nl) +
     '  output:' + (char nl) +
     '    line one' + (char nl) +
@@ -126,16 +135,44 @@ assert equal ($nested_list.items | first | get fields.0.node.tag) "code"
 
 # fold-tree is generic: an independent algebra (leaf count) over the same tree
 let count_algebra: record = {
-    "scalar": {|_t: any| 1 }
-    "text": {|_t: any| 1 }
-    "json": {|_t: any| 1 }
-    "code": {|_t: any| 1 }
-    "lines": {|_t: any| 1 }
+    "scalar": {|_node: any| 1 }
+    "text": {|_node: any| 1 }
+    "json": {|_node: any| 1 }
+    "code": {|_node: any| 1 }
+    "lines": {|_node: any| 1 }
     "record": {|fields: any| if ($fields | is-empty) { 0 } else { $fields | get value | math sum } }
     "list": {|items: any| if ($items | is-empty) { 0 } else { $items | get value | math sum } }
 }
 let count_tree: record = ({a: {b: 1}, c: [1 2]} | classify-display)
 assert equal (fold-tree $count_tree $count_algebra) 3
 assert equal (fold-tree (5 | classify-display) $count_algebra) 1
+
+# fixture: a real Bash card — the Nu pipeline command renders as CODE (raw
+# quotes, no escapes) and the whole layout is pinned on the stripped form.
+let card: record = {
+    type: "tool"
+    state: {
+        input: {
+            command: 'rg -n -F "KIND_TURN_FAILED = " /tmp/BusProducer.kt | complete | get stdout | lines | to text'
+            description: "Locate the constants block"
+        }
+        output: '435:        const val KIND_TURN_FAILED = "turn.failed"'
+    }
+}
+let card_out: string = ($card | render-expanded)
+let card_plain: string = ($card_out | ansi strip)
+assert ($card_out | str contains $ESC)
+assert equal $card_plain (
+    '{' + (char nl) +
+    '  type: "tool"' + (char nl) +
+    '  state: {' + (char nl) +
+    '    input: {' + (char nl) +
+    '      command: rg -n -F "KIND_TURN_FAILED = " /tmp/BusProducer.kt | complete | get stdout | lines | to text' + (char nl) +
+    '      description: "Locate the constants block"' + (char nl) +
+    '    }' + (char nl) +
+    '    output: "435:        const val KIND_TURN_FAILED = \"turn.failed\""' + (char nl) +
+    '  }' + (char nl) +
+    '}'
+)
 
 print "test_highlight ok"
