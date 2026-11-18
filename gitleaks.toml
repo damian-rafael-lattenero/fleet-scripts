@@ -13,9 +13,10 @@
 #    suite, whose fixtures are full of fake keys ("e2e-fixture-key",
 #    "user-api-key", token-shaped samples). TRADE-OFF, stated plainly: the
 #    gate's job is production code + infra; our OWN tests keep the inline
-#    `// gitleaks:allow` discipline when they need a literal. A real key
-#    pasted into a vendored test would slip — reviewed by the history sweep's
-#    high-signal rules (aws/github/private-key) which DO cover those paths.
+#    `// gitleaks:allow` discipline when they need a literal. The HISTORY
+#    question ("did a LIVE key ever land?") is answered by trufflehog's own
+#    git walker with verification (secret-scan.nu --history), which covers
+#    every path, tests included.
 title = "zcode-house"
 
 [extend]
