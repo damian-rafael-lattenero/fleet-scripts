@@ -175,4 +175,50 @@ assert equal $card_plain (
     '}'
 )
 
+# living fixture: a real multi-line Bash card — the owner's repo-branch
+# script as the command and a 20-row pipe table as the output. The command
+# must classify as code (colored, unquoted) and both blocks must expand into
+# real lines, one level deeper than their keys.
+const BRANCHES_CMD: string = r#'def branches [p: string]: nothing -> record {
+  let d0 = (do { ^git -C $p symbolic-ref --short refs/remotes/origin/HEAD } | complete).stdout | str trim | str replace "origin/" ""
+  let def = (if $d0 == "" { (do { ^git -C $p branch --show-current } | complete).stdout | str trim } else { $d0 })
+  let local = (do { ^git -C $p branch --format "%(refname:short)|%(upstream:short)|%(upstream:track)|%(committerdate:short)" } | complete).stdout | lines | where {|l| $l != ""}
+  {def: $def, local: $local}
+}
+[ZCode agent-brain bot cv eri haskell-rules-and-mcp kap kap-starter kotlin-kb nushell-fp pg-base rxjava-applicative-dsl sql-psi sqldelight whatsdigest-kt zcode-bot-kotlin zcode-diff-ask zcode-watchdog] | each {|r| let p = $"/Users/lattenero/Projects/($r)"; let d = (branches $p); $"=== ($r) default=($d.def)"; $d.local | each {|l| $"  ($l)"} } | flatten | str join "\n"'#
+
+const BRANCHES_OUT: string = r#'damian|origin/damian||2026-11-18
+main|origin/main||2026-10-20
+master|origin/master||2026-11-18
+master|origin/master||2026-11-02
+master|origin/master||2026-11-13
+main|origin/main||2026-10-26
+master|origin/master||2026-11-13
+master|origin/master||2026-11-17
+master|origin/master||2026-11-16
+master|origin/master||2026-11-17
+master|origin/master||2026-11-18
+master|||2026-11-18
+develop|origin/develop||2026-11-10
+main|origin/main||2026-11-15
+damian|origin/damian||2026-11-16
+master|origin/master||2026-11-18
+master|origin/master||2026-11-18
+wip/retry-f22|origin/wip/retry-f22||2026-11-02
+master|origin/master||2026-11-18
+master|origin/master||2026-11-13'#
+
+let branches_card: record = {command: $BRANCHES_CMD, output: $BRANCHES_OUT}
+assert equal (($branches_card | classify-display).fields.0.node.tag) "code"
+let branches_render: string = ($branches_card | render-expanded)
+let branches_plain: string = ($branches_render | ansi strip)
+assert ($branches_render | str contains $ESC)
+assert equal ($branches_plain | lines | length) 31
+let command_block: list<string> = ($branches_plain | lines | skip 2 | first ($BRANCHES_CMD | lines | length))
+let expected_command: list<string> = ($BRANCHES_CMD | lines | each {|line: any| "    " + $line })
+assert equal $command_block $expected_command
+let output_block: list<string> = ($branches_plain | lines | skip 10 | first ($BRANCHES_OUT | lines | length))
+let expected_output: list<string> = ($BRANCHES_OUT | lines | each {|line: any| "    " + $line })
+assert equal $output_block $expected_output
+
 print "test_highlight ok"
