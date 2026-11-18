@@ -184,6 +184,21 @@ def render-node [value: any, pad: string]: nothing -> string {
     $value | to nuon
 }
 
+# Does the value carry a string leaf that `render-node` would expand? This is
+# the trigger for `out`: plain data keeps the palette-colored NUON/JSON view.
+export def expandable-leaf? []: any -> bool {
+    let value: any = $in
+    let description: string = ($value | describe)
+    if ($description | str starts-with "string") { return (block-string? $value) }
+    if ($description | str starts-with "record") {
+        return ($value | columns | any {|key: any| ($value | get $key | expandable-leaf?) })
+    }
+    if ($description | str starts-with "list") or ($description | str starts-with "table") {
+        return ($value | any {|item: any| ($item | expandable-leaf?) })
+    }
+    false
+}
+
 # Render any value for display, expanding structured string leaves.
 export def render-expanded []: any -> string {
     let value: any = $in
@@ -192,17 +207,21 @@ export def render-expanded []: any -> string {
 
 # Terminal counterpart of the ZCode card renderer: structured strings are
 # pretty-printed and colored with bat; tables/lists render with nu's table.
-# CSV/TSV stay as-is (bat has no grammar for them). --expand goes further:
-# string leaves inside the value are expanded by `render-expanded`.
-export def out [--expand]: any -> nothing {
+# CSV/TSV stay as-is (bat has no grammar for them). Values that carry a
+# structured string leaf (embedded JSON, multi-line text, Nu code) render with
+# `render-expanded`; --compact keeps the plain NUON/JSON view instead.
+export def out [--compact]: any -> nothing {
     let value: any = $in
     let description: string = ($value | describe)
     if ($description | str starts-with "string") {
         let text: string = $value
         let kind: string = (structured-output-kind $text)
-        if $expand and ($kind == "json") {
-            print (render-node (try { $text | from json } catch { $text }) "")
-            return
+        if not $compact and ($kind == "json") {
+            let parsed: any = (try { $text | from json } catch { $text })
+            if ($parsed | expandable-leaf?) {
+                print (render-node $parsed "")
+                return
+            }
         }
         if ($kind | is-empty) or ($kind in ["csv" "tsv"]) {
             print $text
@@ -210,7 +229,7 @@ export def out [--expand]: any -> nothing {
             let language: string = (if $kind == "jsonl" { "json" } else { $kind })
             highlight-text $language (structured-output-text $text $kind) | print
         }
-    } else if $expand {
+    } else if not $compact and ($value | expandable-leaf?) {
         print (render-node $value "")
     } else {
         # NUON is Nushell's own literal format: --pretty indents records and
