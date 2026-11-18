@@ -51,4 +51,48 @@ let pretty: string = (structured-output-text '{"a":1}' "json")
 assert equal $pretty ('{' + (char nl) + '  "a": 1' + (char nl) + '}')
 assert equal (structured-output-text "x: 1" "yaml") "x: 1"
 
+# render-expanded: layout is pinned for a small tree (quoted single-line leaf)
+let tree: record = {user: {name: "ana", tags: ["x" "y"]}, ok: true}
+assert equal ($tree | render-expanded) (
+    '{' + (char nl) +
+    '  user: {' + (char nl) +
+    '    name: "ana"' + (char nl) +
+    '    tags: [' + (char nl) +
+    '      "x"' + (char nl) +
+    '      "y"' + (char nl) +
+    '    ]' + (char nl) +
+    '  }' + (char nl) +
+    '  ok: true' + (char nl) +
+    '}'
+)
+assert equal ({} | render-expanded) "{}"
+assert equal ([] | render-expanded) "[]"
+
+# multi-line text becomes real lines, not escaped ones
+let block_text: string = ("line one" + (char nl) + "line two")
+assert equal ({output: $block_text} | render-expanded) (
+    '{' + (char nl) +
+    '  output:' + (char nl) +
+    '    line one' + (char nl) +
+    '    line two' + (char nl) +
+    '}'
+)
+
+# embedded JSON is pretty-printed (and bat-colored); ANSI splits tokens, so
+# text assertions run on the stripped form
+let json_leaf: string = '{"a":1,"b":[1,2]}'
+let json_out: string = ({payload: $json_leaf} | render-expanded)
+assert ($json_out | str contains $ESC)
+let json_plain: string = ($json_out | ansi strip)
+assert ($json_plain | str contains '"a": 1')
+assert (($json_out | lines | length) > 4)
+assert ($json_plain | str contains "payload:")
+
+# Nu code leaves are highlighted, inline when single-line and as a block when not
+assert (({command: "let x = 1"} | render-expanded) | str contains $ESC)
+let code: string = ("let x = 1" + (char nl) + "print $x")
+let code_out: string = ({command: $code} | render-expanded)
+assert ($code_out | str contains $ESC)
+assert equal ($code_out | lines | length) 5
+
 print "test_highlight ok"

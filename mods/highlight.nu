@@ -93,21 +93,125 @@ export def structured-output-text [text: string, kind: string]: nothing -> strin
     }
 }
 
+# ── Tree rendering: the whole-value view behind `out --expand` ────────
+# Serializers escape strings by design (a JSON/NUON string is one line) and
+# bat/shiki are syntax-level, so neither formats what is INSIDE a string
+# value. These helpers walk the tree and classify each string leaf: embedded
+# JSON is pretty-printed, multi-line text becomes real lines, Nu code is
+# highlighted, and everything else keeps its quotes.
+
+const PAD: string = "  "
+
+# Conservative Nu-code detector: a declaration head, an external head, or a
+# pipe combined with a variable. Prose and log lines stay plain.
+def looks-like-nu [text: string]: nothing -> bool {
+    let trimmed: string = ($text | str trim)
+    if ($trimmed | is-empty) { return false }
+    let head: string = ($trimmed | split row " " | first)
+    let declarations: list<string> = ["let" "mut" "def" "use" "alias" "source" "export" "if" "for" "while" "print"]
+    ($head in $declarations) or ($head | str starts-with "^") or (($trimmed | str contains '$') and ($trimmed | str contains " | "))
+}
+
+# Prefix every line of a (possibly ANSI-colored) block.
+def indent-lines [text: string, pad: string]: nothing -> string {
+    $text | str trim --right | lines | each {|line: any| $pad + $line } | str join (char nl)
+}
+
+# Key style matches NUON: bare when identifier-like, quoted otherwise.
+def render-key [key: string]: nothing -> string {
+    if ($key =~ '^[A-Za-z_][A-Za-z0-9_]*$') { $key } else { $key | to nuon }
+}
+
+# A string leaf that renders as a block: multi-line text or embedded JSON.
+def block-string? [value: any]: nothing -> bool {
+    let description: string = ($value | describe)
+    if not ($description | str starts-with "string") { return false }
+    ($value | str contains (char nl)) or ((structured-output-kind $value) == "json")
+}
+
+def render-string [text: string, pad: string]: nothing -> string {
+    let kind: string = (structured-output-kind $text)
+    if $kind == "json" or $kind == "jsonl" {
+        let language: string = (if $kind == "jsonl" { "json" } else { $kind })
+        let pretty: string = (structured-output-text $text $kind)
+        return (indent-lines (highlight-text $language $pretty) $pad)
+    }
+    if ($text | str contains (char nl)) {
+        let body: string = (
+            if (looks-like-nu $text) {
+                try { highlight-text "nu" $text } catch { $text }
+            } else {
+                $text
+            }
+        )
+        return (indent-lines $body $pad)
+    }
+    if (looks-like-nu $text) {
+        return (try { highlight-text "nu" $text } catch { $text })
+    }
+    $text | to nuon
+}
+
+def render-node [value: any, pad: string]: nothing -> string {
+    let description: string = ($value | describe)
+    if ($description | str starts-with "record") {
+        let keys: list<string> = ($value | columns)
+        if ($keys | is-empty) { return "{}" }
+        let body: list<string> = ($keys | each {|key: any|
+            let item: any = ($value | get $key)
+            if (block-string? $item) {
+                $pad + $PAD + (render-key $key) + ":" + (char nl) + (render-string $item ($pad + $PAD + $PAD))
+            } else {
+                $pad + $PAD + (render-key $key) + ": " + (render-node $item ($pad + $PAD))
+            }
+        })
+        return ("{" + (char nl) + ($body | str join (char nl)) + (char nl) + $pad + "}")
+    }
+    if ($description | str starts-with "list") or ($description | str starts-with "table") {
+        if (($value | length) == 0) { return "[]" }
+        let body: list<string> = ($value | each {|item: any|
+            if (block-string? $item) {
+                (render-string $item ($pad + $PAD))
+            } else {
+                $pad + $PAD + (render-node $item ($pad + $PAD))
+            }
+        })
+        return ("[" + (char nl) + ($body | str join (char nl)) + (char nl) + $pad + "]")
+    }
+    if ($description | str starts-with "string") {
+        return (render-string $value $pad)
+    }
+    $value | to nuon
+}
+
+# Render any value for display, expanding structured string leaves.
+export def render-expanded []: any -> string {
+    let value: any = $in
+    render-node $value ""
+}
+
 # Terminal counterpart of the ZCode card renderer: structured strings are
 # pretty-printed and colored with bat; tables/lists render with nu's table.
-# CSV/TSV stay as-is (bat has no grammar for them).
-export def out []: any -> nothing {
+# CSV/TSV stay as-is (bat has no grammar for them). --expand goes further:
+# string leaves inside the value are expanded by `render-expanded`.
+export def out [--expand]: any -> nothing {
     let value: any = $in
     let description: string = ($value | describe)
     if ($description | str starts-with "string") {
         let text: string = $value
         let kind: string = (structured-output-kind $text)
+        if $expand and ($kind == "json") {
+            print (render-node (try { $text | from json } catch { $text }) "")
+            return
+        }
         if ($kind | is-empty) or ($kind in ["csv" "tsv"]) {
             print $text
         } else {
             let language: string = (if $kind == "jsonl" { "json" } else { $kind })
             highlight-text $language (structured-output-text $text $kind) | print
         }
+    } else if $expand {
+        print (render-node $value "")
     } else {
         # NUON is Nushell's own literal format: --pretty indents records and
         # aligns table columns, and nu-highlight colors it as Nu code.
