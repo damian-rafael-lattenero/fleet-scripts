@@ -47,3 +47,70 @@ export def hl [--language (-l): string, ...paths: path]: any -> string {
         } | str join "\n"
     }
 }
+
+# Detect a structured text shape for terminal rendering: "json", "jsonl",
+# "csv", "tsv", or "" when unknown. Conservative: prose and logs stay plain.
+export def structured-output-kind [text: string]: nothing -> string {
+    let trimmed: string = ($text | str trim)
+    if ($trimmed | is-empty) { return "" }
+    if (($trimmed | str starts-with "{") or ($trimmed | str starts-with "[")) {
+        let is_json: bool = (try { $trimmed | from json; true } catch { false })
+        if $is_json { return "json" }
+    }
+
+    let lines: list<string> = (
+        $trimmed
+        | lines
+        | each {|line: any| $line | str trim }
+        | where {|line: any| $line | is-not-empty }
+    )
+    if (($lines | length) >= 1) {
+        let all_json: bool = ($lines | all {|line: any| (($line | str starts-with "{") or ($line | str starts-with "[")) and (try { $line | from json; true } catch { false }) })
+        if $all_json { return "jsonl" }
+    }
+    if (($lines | length) >= 2) {
+        let commas: list<int> = ($lines | each {|line: any| ($line | split row "," | length) - 1 })
+        let first_comma: int = ($commas | first)
+        if (($first_comma >= 1) and ($commas | all {|c: any| $c == $first_comma })) {
+            return "csv"
+        }
+        let tabs: list<int> = ($lines | each {|line: any| ($line | split row (char tab) | length) - 1 })
+        let first_tab: int = ($tabs | first)
+        if (($first_tab >= 1) and ($tabs | all {|c: any| $c == $first_tab })) {
+            return "tsv"
+        }
+    }
+    ""
+}
+
+# Pretty-print structured text for display. JSON gets 2-space indentation;
+# other kinds pass through (bat colors them).
+export def structured-output-text [text: string, kind: string]: nothing -> string {
+    if $kind == "json" {
+        try { $text | from json | to json } catch { $text }
+    } else {
+        $text
+    }
+}
+
+# Terminal counterpart of the ZCode card renderer: structured strings are
+# pretty-printed and colored with bat; tables/lists render with nu's table.
+# CSV/TSV stay as-is (bat has no grammar for them).
+export def out []: any -> nothing {
+    let value: any = $in
+    let description: string = ($value | describe)
+    if ($description | str starts-with "string") {
+        let text: string = $value
+        let kind: string = (structured-output-kind $text)
+        if ($kind | is-empty) or ($kind in ["csv" "tsv"]) {
+            print $text
+        } else {
+            let language: string = (if $kind == "jsonl" { "json" } else { $kind })
+            highlight-text $language (structured-output-text $text $kind) | print
+        }
+    } else {
+        # NUON is Nushell's own literal format: --pretty indents records and
+        # aligns table columns, and nu-highlight colors it as Nu code.
+        $value | to nuon --pretty | nu-highlight | print
+    }
+}

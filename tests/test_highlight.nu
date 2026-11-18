@@ -35,4 +35,20 @@ assert ($piped_out | str contains $ESC)
 assert equal (highlight-text "" "plain") "plain"
 assert equal ("plain" | hl) "plain"
 
+# structured-output-kind: JSON, JSONL, CSV, TSV, plain
+assert equal (structured-output-kind '{"a":1}') "json"
+assert equal (structured-output-kind '[1,2]') "json"
+let jsonl_in: string = '{"a":1}' + (char nl) + '{"b":2}'
+assert equal (structured-output-kind $jsonl_in) "jsonl"
+let csv_in: string = "name,size" + (char nl) + "alpha,1"
+assert equal (structured-output-kind $csv_in) "csv"
+let tsv_in: string = "a" + (char tab) + "b" + (char nl) + "1" + (char tab) + "2"
+assert equal (structured-output-kind $tsv_in) "tsv"
+assert equal (structured-output-kind "plain text") ""
+
+# structured-output-text: JSON pretty-printed, other kinds untouched
+let pretty: string = (structured-output-text '{"a":1}' "json")
+assert equal $pretty ('{' + (char nl) + '  "a": 1' + (char nl) + '}')
+assert equal (structured-output-text "x: 1" "yaml") "x: 1"
+
 print "test_highlight ok"

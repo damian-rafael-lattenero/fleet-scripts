@@ -124,14 +124,19 @@ in traverse-option / fold-result.
 `nu-highlight` is the only Nushell highlighter and it speaks nothing else;
 `bat` ships no Nushell grammar. This module routes `.nu` to `nu-highlight`
 (the active `$env.config.color_config` palette) and every other language to
-`bat --theme=ansi` (the terminal palette, not a bundled theme). Verified on
-nu 0.117.0 with bat 0.26.1.
+`bat --theme=ansi` (the terminal palette, not a bundled theme). `out` is the
+terminal counterpart of the ZCode card renderer: structured strings are
+pretty-printed and colored, and records/lists render as pretty NUON
+(`to nuon --pretty | nu-highlight`). Verified on nu 0.117.0 with bat 0.26.1.
 
 | function | type | summary |
 |---|---|---|
 | `highlight-language` | `path?, explicit? -> string` | explicit override, else lowercased path extension, else "" |
 | `highlight-text` | `language: string, code: string -> string` | ANSI-highlight a string; nu-highlight for nu, bat otherwise |
 | `hl` | `--language (-l): string, ...paths: path -> string` | highlight files, or the piped input when no paths |
+| `structured-output-kind` | `text: string -> string` | "json" / "jsonl" / "csv" / "tsv" / "" (conservative, no prose guessing) |
+| `structured-output-text` | `text: string, kind: string -> string` | pretty-print JSON (2 spaces); other kinds pass through |
+| `out` | `any -> nothing` | terminal renderer: structured strings pretty+colored, records/lists as pretty NUON |
 
 ### mods/json.nu — lenses over structured records
 
