@@ -174,6 +174,18 @@ honest error). In-process async — jobs are threads and die with nu.
 | `build-record-jobs` | `record -> record` | fill a record: every field a job, record lands when the last does; empty record is `{}` |
 | `apply-async` | `list<closure>, c: closure -> any` | concurrent deferred args fed into a curried closure (`.with` chain) |
 
+### mods/telegram.nu — the deploy announce rung
+
+The ONE `send-telegram` every repo's deploy script calls (it used to live
+copy-pasted in zcode-bot-kotlin/scripts/lib/deploy.nu,
+whatsdigest-kt/scripts/deploy-daemon.nu and ZCode/scripts/lib/fork-ops.nu).
+Silent by design: a missing config, an empty token/chat or a dead network are
+no-ops — a deploy never dies because the phone is off.
+
+| function | type | summary |
+|---|---|---|
+| `send-telegram` | `text: string, --html: switch -> nothing` | POST the text to the chat in `~/.zcode/telegram-remote.json`; `--html` sets parse_mode |
+
 ## Examples
 
 - `examples/hello-applicative.nu` — the concurrency theorem LIVE: 5 deferred
