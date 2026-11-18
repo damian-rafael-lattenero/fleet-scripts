@@ -119,6 +119,20 @@ in traverse-option / fold-result.
 |---|---|---|
 | `human-num` | `x: int -> string` | the raw -> K -> M ladder (American system); M fires AT the boundary — 1000000 is "1M", never "1000K"; trailing zeros trimmed |
 
+### mods/highlight.nu — terminal syntax highlighting (gap over builtins)
+
+`nu-highlight` is the only Nushell highlighter and it speaks nothing else;
+`bat` ships no Nushell grammar. This module routes `.nu` to `nu-highlight`
+(the active `$env.config.color_config` palette) and every other language to
+`bat --theme=ansi` (the terminal palette, not a bundled theme). Verified on
+nu 0.117.0 with bat 0.26.1.
+
+| function | type | summary |
+|---|---|---|
+| `highlight-language` | `path?, explicit? -> string` | explicit override, else lowercased path extension, else "" |
+| `highlight-text` | `language: string, code: string -> string` | ANSI-highlight a string; nu-highlight for nu, bat otherwise |
+| `hl` | `--language (-l): string, ...paths: path -> string` | highlight files, or the piped input when no paths |
+
 ### mods/json.nu — lenses over structured records
 
 Built on the 0.117 machinery (`merge deep` IS deep-merge), filling what
