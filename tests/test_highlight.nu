@@ -95,4 +95,47 @@ let code_out: string = ({command: $code} | render-expanded)
 assert ($code_out | str contains $ESC)
 assert equal ($code_out | lines | length) 5
 
+# expandable-leaf?: the trigger for out — only structured string leaves count
+assert (not ({a: "plain", b: 1} | expandable-leaf?))
+assert (not ([{a: 1} {a: 2}] | expandable-leaf?))
+assert (not ([] | expandable-leaf?))
+assert ({a: ("x" + (char nl) + "y")} | expandable-leaf?)
+assert ({a: {b: '{"k":1}'}} | expandable-leaf?)
+assert ([{a: 1} {a: ("x" + (char nl) + "y")}] | expandable-leaf?)
+
+# classify-display: every Nushell value kind lands in the display ADT
+assert equal ('{"a":1}' | classify-display | get tag) "json"
+assert equal ("let x = 1" | classify-display | get tag) "code"
+assert equal (("plain" + (char nl) + "text") | classify-display | get tag) "lines"
+assert equal ("plain" | classify-display | get tag) "text"
+assert equal (42 | classify-display | get tag) "scalar"
+assert equal (2.5 | classify-display | get tag) "scalar"
+assert equal (true | classify-display | get tag) "scalar"
+assert equal (null | classify-display | get tag) "scalar"
+assert equal ({a: 1} | classify-display | get tag) "record"
+assert equal ([1 2] | classify-display | get tag) "list"
+assert equal ([[a]; [1] [2]] | classify-display | get tag) "list"
+
+# nested values keep their own tags (parse once, recurse structurally)
+let nested: record = ({a: {b: '{"k":1}'}} | classify-display)
+assert equal ($nested.fields | first | get node.tag) "record"
+assert equal ($nested.fields | first | get node.fields.0.node.tag) "json"
+let nested_list: record = ([{a: "let x = 1"}] | classify-display)
+assert equal ($nested_list.items | first | get tag) "record"
+assert equal ($nested_list.items | first | get fields.0.node.tag) "code"
+
+# fold-tree is generic: an independent algebra (leaf count) over the same tree
+let count_algebra: record = {
+    "scalar": {|_t: any| 1 }
+    "text": {|_t: any| 1 }
+    "json": {|_t: any| 1 }
+    "code": {|_t: any| 1 }
+    "lines": {|_t: any| 1 }
+    "record": {|fields: any| if ($fields | is-empty) { 0 } else { $fields | get value | math sum } }
+    "list": {|items: any| if ($items | is-empty) { 0 } else { $items | get value | math sum } }
+}
+let count_tree: record = ({a: {b: 1}, c: [1 2]} | classify-display)
+assert equal (fold-tree $count_tree $count_algebra) 3
+assert equal (fold-tree (5 | classify-display) $count_algebra) 1
+
 print "test_highlight ok"

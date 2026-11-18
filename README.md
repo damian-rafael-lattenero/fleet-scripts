@@ -127,11 +127,12 @@ in traverse-option / fold-result.
 `bat --theme=ansi` (the terminal palette, not a bundled theme). `out` is the
 terminal counterpart of the ZCode card renderer: structured strings are
 pretty-printed and colored, and records/lists render as pretty NUON
-(`to nuon --pretty | nu-highlight`). `render-expanded` (and `out --expand`)
-goes one level further and formats what is INSIDE string values — serializers
-escape strings by design and bat/shiki never look into one, so this walks the
-tree and expands each structured leaf: embedded JSON pretty-printed, multi-line
-text as real lines, Nu code highlighted. Verified on nu 0.117.0 with bat 0.26.1.
+(`to nuon --pretty | nu-highlight`). `render-expanded` (and `out`, whenever the
+value carries a structured string leaf) goes one level further and formats what
+is INSIDE string values — serializers escape strings by design and bat/shiki
+never look into one, so this walks the tree and expands each structured leaf:
+embedded JSON pretty-printed, multi-line text as real lines, Nu code
+highlighted. Verified on nu 0.117.0 with bat 0.26.1.
 
 | function | type | summary |
 |---|---|---|
@@ -140,8 +141,11 @@ text as real lines, Nu code highlighted. Verified on nu 0.117.0 with bat 0.26.1.
 | `hl` | `--language (-l): string, ...paths: path -> string` | highlight files, or the piped input when no paths |
 | `structured-output-kind` | `text: string -> string` | "json" / "jsonl" / "csv" / "tsv" / "" (conservative, no prose guessing) |
 | `structured-output-text` | `text: string, kind: string -> string` | pretty-print JSON (2 spaces); other kinds pass through |
+| `classify-display` | `any -> record` | parse any value ONCE into the display ADT (tagged records; record/list recurse, strings split into text/json/code/lines) |
+| `fold-tree` | `tree: record, algebra: record -> any` | the catamorphism: recursion lives here, each constructor has its own closure; render/expandable are algebras |
+| `expandable-leaf?` | `any -> bool` | trigger: does the value carry a structured string leaf? |
 | `render-expanded` | `any -> string` | display renderer: tree layout with string leaves expanded (embedded JSON pretty+colored, multi-line text as lines, Nu code highlighted) |
-| `out` | `any, --expand -> nothing` | terminal renderer: structured strings pretty+colored, records/lists as pretty NUON; `--expand` uses `render-expanded` |
+| `out` | `any, --compact -> nothing` | terminal renderer: structured strings pretty+colored, records/lists as pretty NUON; auto-expands values with structured string leaves, `--compact` keeps the plain view |
 
 ### mods/json.nu — lenses over structured records
 

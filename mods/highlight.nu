@@ -43,7 +43,7 @@ export def hl [--language (-l): string, ...paths: path]: any -> string {
         highlight-text (highlight-language $no_path $language) $piped
     } else {
         $paths | each {|p: any|
-            highlight-text (highlight-language $p $language) (open --raw $p)
+            highlight-text (highlight-language $p) (open --raw $p)
         } | str join "\n"
     }
 }
@@ -93,12 +93,22 @@ export def structured-output-text [text: string, kind: string]: nothing -> strin
     }
 }
 
-# ── Tree rendering: the whole-value view behind `out --expand` ────────
-# Serializers escape strings by design (a JSON/NUON string is one line) and
-# bat/shiki are syntax-level, so neither formats what is INSIDE a string
-# value. These helpers walk the tree and classify each string leaf: embedded
-# JSON is pretty-printed, multi-line text becomes real lines, Nu code is
-# highlighted, and everything else keeps its quotes.
+# ── Display tree: one ADT, one catamorphism, many algebras ────────────
+# Every Nushell value is classified ONCE into this sum type (tagged records):
+#   {tag: "scalar", text}            numbers, bools, null, dates, durations,
+#                                    filesizes, binaries, ranges… as NUON text
+#   {tag: "text",   text}            plain single-line string
+#   {tag: "json",   text}            string holding embedded JSON / JSONL
+#   {tag: "code",   text}            string holding Nu code
+#   {tag: "lines",  text}            multi-line plain text
+#   {tag: "record", fields}          product: list<{key: string, node: Tree}>
+#   {tag: "list",   items}           recursion: list<Tree> (tables included)
+# `classify-display` is the pure parser (parse once, don't re-probe), and
+# `fold-tree` is the only eliminator: recursion and child folds live there,
+# so render / expandable / any future query is an ALGEBRA (a record of
+# closures passed as a value) instead of a new if-chain. Serializers escape
+# strings by design and bat/shiki never look inside one, which is why the
+# expansion has to happen at this layer.
 
 const PAD: string = "  "
 
@@ -117,99 +127,166 @@ def indent-lines [text: string, pad: string]: nothing -> string {
     $text | str trim --right | lines | each {|line: any| $pad + $line } | str join (char nl)
 }
 
+# Shift every line AFTER the first (an inline value's continuation lines).
+def shift-continuation [text: string, prefix: string]: nothing -> string {
+    let rows: list<string> = ($text | lines)
+    if (($rows | length) <= 1) { return $text }
+    ($rows | first) + (char nl) + ($rows | skip 1 | each {|line: any| $prefix + $line } | str join (char nl))
+}
+
 # Key style matches NUON: bare when identifier-like, quoted otherwise.
 def render-key [key: string]: nothing -> string {
     if ($key =~ '^[A-Za-z_][A-Za-z0-9_]*$') { $key } else { $key | to nuon }
 }
 
-# A string leaf that renders as a block: multi-line text or embedded JSON.
-def block-string? [value: any]: nothing -> bool {
-    let description: string = ($value | describe)
-    if not ($description | str starts-with "string") { return false }
-    ($value | str contains (char nl)) or ((structured-output-kind $value) == "json")
-}
+# ── The parser: value -> Tree (pure, total) ───────────────────────────
 
-def render-string [text: string, pad: string]: nothing -> string {
+def classify-string [text: string]: nothing -> record {
     let kind: string = (structured-output-kind $text)
-    if $kind == "json" or $kind == "jsonl" {
-        let language: string = (if $kind == "jsonl" { "json" } else { $kind })
-        let pretty: string = (structured-output-text $text $kind)
-        return (indent-lines (highlight-text $language $pretty) $pad)
-    }
-    if ($text | str contains (char nl)) {
-        let body: string = (
-            if (looks-like-nu $text) {
-                try { highlight-text "nu" $text } catch { $text }
-            } else {
-                $text
-            }
-        )
-        return (indent-lines $body $pad)
-    }
-    if (looks-like-nu $text) {
-        return (try { highlight-text "nu" $text } catch { $text })
-    }
-    $text | to nuon
+    if $kind == "json" or $kind == "jsonl" { return {tag: "json", text: $text} }
+    if (looks-like-nu $text) { return {tag: "code", text: $text} }
+    if ($text | str contains (char nl)) { return {tag: "lines", text: $text} }
+    {tag: "text", text: $text}
 }
 
-def render-node [value: any, pad: string]: nothing -> string {
+# Scalar fallback is total: NUON for anything serializable, `describe` for
+# values NUON cannot render (closures, custom values).
+def classify-scalar [value: any]: nothing -> record {
+    try {
+        {tag: "scalar", text: ($value | to nuon)}
+    } catch {
+        {tag: "scalar", text: ($value | describe)}
+    }
+}
+
+def classify-value [value: any]: nothing -> record {
     let description: string = ($value | describe)
     if ($description | str starts-with "record") {
-        let keys: list<string> = ($value | columns)
-        if ($keys | is-empty) { return "{}" }
-        let body: list<string> = ($keys | each {|key: any|
-            let item: any = ($value | get $key)
-            if (block-string? $item) {
-                $pad + $PAD + (render-key $key) + ":" + (char nl) + (render-string $item ($pad + $PAD + $PAD))
-            } else {
-                $pad + $PAD + (render-key $key) + ": " + (render-node $item ($pad + $PAD))
-            }
+        let fields: list<any> = ($value | columns | each {|key: any|
+            {key: $key, node: (classify-value ($value | get $key))}
         })
-        return ("{" + (char nl) + ($body | str join (char nl)) + (char nl) + $pad + "}")
+        return {tag: "record", fields: $fields}
     }
     if ($description | str starts-with "list") or ($description | str starts-with "table") {
-        if (($value | length) == 0) { return "[]" }
-        let body: list<string> = ($value | each {|item: any|
-            if (block-string? $item) {
-                (render-string $item ($pad + $PAD))
-            } else {
-                $pad + $PAD + (render-node $item ($pad + $PAD))
-            }
-        })
-        return ("[" + (char nl) + ($body | str join (char nl)) + (char nl) + $pad + "]")
+        return {tag: "list", items: ($value | each {|item: any| classify-value $item })}
     }
-    if ($description | str starts-with "string") {
-        return (render-string $value $pad)
-    }
-    $value | to nuon
+    if ($description | str starts-with "string") { return (classify-string $value) }
+    classify-scalar $value
 }
 
-# Does the value carry a string leaf that `render-node` would expand? This is
-# the trigger for `out`: plain data keeps the palette-colored NUON/JSON view.
+# Classify any value into the display tree (pure, total).
+export def classify-display []: any -> record {
+    let value: any = $in
+    classify-value $value
+}
+
+# ── The eliminator: catamorphism over the Tree ────────────────────────
+# algebra = one closure per constructor:
+#   scalar/text/json/code/lines : |text: string| -> A
+#   record                      : |fields: list<{key, node, value: A}>| -> A
+#   list                        : |items: list<{node, value: A}>| -> A
+# The parent receives each child's folded value; nodes that decide layout
+# also see the child node itself (a paramorphism by construction).
+export def fold-tree [tree: record, algebra: record]: nothing -> any {
+    let tag: string = $tree.tag
+    if $tag == "record" {
+        let fields: list<any> = ($tree.fields | each {|field: any|
+            {key: $field.key, node: $field.node, value: (fold-tree $field.node $algebra)}
+        })
+        let handler: closure = ($algebra | get "record")
+        return (do $handler $fields)
+    }
+    if $tag == "list" {
+        let items: list<any> = ($tree.items | each {|item: any|
+            {node: $item, value: (fold-tree $item $algebra)}
+        })
+        let handler: closure = ($algebra | get "list")
+        return (do $handler $items)
+    }
+    let handler: closure = ($algebra | get $tag)
+    do $handler $tree.text
+}
+
+# A leaf that renders as a block (its own lines): embedded JSON always, code
+# and plain text only when they actually span multiple lines.
+def block-node? [node: record]: nothing -> bool {
+    if $node.tag == "json" { return true }
+    if $node.tag in ["code" "lines"] { return ($node.text | str contains (char nl)) }
+    false
+}
+
+# ── Algebra: render (relative layout, no pad; parents indent) ─────────
+
+def render-algebra []: nothing -> record {
+    {
+        "scalar": {|text: any| $text }
+        "text": {|text: any| $text | to nuon }
+        "json": {|text: any|
+            let kind: string = (structured-output-kind $text)
+            let language: string = (if $kind == "jsonl" { "json" } else { $kind })
+            highlight-text $language (structured-output-text $text $kind)
+        }
+        "code": {|text: any| try { highlight-text "nu" $text } catch { $text } }
+        "lines": {|text: any| $text | str trim --right }
+        "record": {|fields: any|
+            if ($fields | is-empty) { "{}" } else {
+                let body: list<string> = ($fields | each {|field: any|
+                    if (block-node? $field.node) {
+                        $PAD + (render-key $field.key) + ":" + (char nl) + (indent-lines $field.value ($PAD + $PAD))
+                    } else {
+                        $PAD + (render-key $field.key) + ": " + (shift-continuation $field.value $PAD)
+                    }
+                })
+                "{" + (char nl) + ($body | str join (char nl)) + (char nl) + "}"
+            }
+        }
+        "list": {|items: any|
+            if ($items | is-empty) { "[]" } else {
+                let body: list<string> = ($items | each {|item: any| (indent-lines $item.value $PAD) })
+                "[" + (char nl) + ($body | str join (char nl)) + (char nl) + "]"
+            }
+        }
+    }
+}
+
+# ── Algebra: does the tree carry a block leaf? (the `out` trigger) ────
+
+def has-block-algebra []: nothing -> record {
+    {
+        "scalar": {|_text: any| false }
+        "text": {|_text: any| false }
+        "json": {|_text: any| true }
+        "lines": {|_text: any| true }
+        "code": {|text: any| ($text | str contains (char nl)) }
+        "record": {|fields: any| ($fields | any {|field: any| $field.value }) }
+        "list": {|items: any| ($items | any {|item: any| $item.value }) }
+    }
+}
+
+# Does the value carry a string leaf that the renderer expands? Plain data
+# keeps the palette-colored NUON/JSON view.
 export def expandable-leaf? []: any -> bool {
     let value: any = $in
-    let description: string = ($value | describe)
-    if ($description | str starts-with "string") { return (block-string? $value) }
-    if ($description | str starts-with "record") {
-        return ($value | columns | any {|key: any| ($value | get $key | expandable-leaf?) })
-    }
-    if ($description | str starts-with "list") or ($description | str starts-with "table") {
-        return ($value | any {|item: any| ($item | expandable-leaf?) })
-    }
-    false
+    fold-tree (classify-value $value) (has-block-algebra)
 }
 
 # Render any value for display, expanding structured string leaves.
 export def render-expanded []: any -> string {
     let value: any = $in
-    render-node $value ""
+    fold-tree (classify-value $value) (render-algebra)
+}
+
+# NUON is Nushell's own literal format: --pretty indents records and aligns
+# table columns, and nu-highlight colors it as Nu code.
+def print-nuon [value: any]: nothing -> nothing {
+    $value | to nuon --pretty | nu-highlight | print
 }
 
 # Terminal counterpart of the ZCode card renderer: structured strings are
 # pretty-printed and colored with bat; tables/lists render with nu's table.
 # CSV/TSV stay as-is (bat has no grammar for them). Values that carry a
-# structured string leaf (embedded JSON, multi-line text, Nu code) render with
-# `render-expanded`; --compact keeps the plain NUON/JSON view instead.
+# block leaf (embedded JSON, multi-line text, Nu code) render with the tree;
+# --compact keeps the plain NUON/JSON view instead.
 export def out [--compact]: any -> nothing {
     let value: any = $in
     let description: string = ($value | describe)
@@ -218,8 +295,9 @@ export def out [--compact]: any -> nothing {
         let kind: string = (structured-output-kind $text)
         if not $compact and ($kind == "json") {
             let parsed: any = (try { $text | from json } catch { $text })
-            if ($parsed | expandable-leaf?) {
-                print (render-node $parsed "")
+            let tree: record = (classify-value $parsed)
+            if (fold-tree $tree (has-block-algebra)) {
+                print (fold-tree $tree (render-algebra))
                 return
             }
         }
@@ -229,11 +307,14 @@ export def out [--compact]: any -> nothing {
             let language: string = (if $kind == "jsonl" { "json" } else { $kind })
             highlight-text $language (structured-output-text $text $kind) | print
         }
-    } else if not $compact and ($value | expandable-leaf?) {
-        print (render-node $value "")
+    } else if $compact {
+        print-nuon $value
     } else {
-        # NUON is Nushell's own literal format: --pretty indents records and
-        # aligns table columns, and nu-highlight colors it as Nu code.
-        $value | to nuon --pretty | nu-highlight | print
+        let tree: record = (classify-value $value)
+        if (fold-tree $tree (has-block-algebra)) {
+            print (fold-tree $tree (render-algebra))
+        } else {
+            print-nuon $value
+        }
     }
 }
