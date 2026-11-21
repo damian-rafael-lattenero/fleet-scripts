@@ -1,0 +1,89 @@
+#!/opt/homebrew/bin/nu
+# deploy-status.nu — liveness of the fleet's deploy jobs. READ-ONLY.
+# The law measured on 21/11: a log's mtime proves NOTHING during a build's
+# silent phases; %CPU of the job's pid (two samples) is the only progress
+# proof, and a job loaded+running at ~0% cpu is a STUCK suspect — exactly
+# how the 23:56 fork deploy died with neither error line nor notification.
+# Also reports how each job's LAST run ended: done / failed / unknown.
+# Every line goes to stdout AND ~/Library/Logs/deploy-status.log.
+
+const LOG_FILE: string = "/Users/lattenero/Library/Logs/deploy-status.log"
+
+# Nested script nu does NOT load config.nu — the owner's thin theme rides
+# the script itself (measured 21/11).
+$env.config.table.mode = "thin"
+const JOBS: list<record> = [
+    {job: "brain", label: "com.zcode.brain-deploy", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-brain.log"}
+    {job: "bot", label: "com.zcode.bot-deploy", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-daemon.log"}
+    {job: "whatsapp", label: "com.zcode.wd-deploy", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-whatsapp.log"}
+    {job: "fork", label: "com.zcode.deploy-fork", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-fork.log"}
+]
+
+def emit [line: string]: nothing -> nothing {
+    print $line
+    $"($line)\n" | save --append --raw $LOG_FILE
+}
+
+def cpu-of [pid: int]: nothing -> float {
+    let out: record = (do { ^ps -p $pid -o %cpu= } | complete)
+    if $out.exit_code != 0 { 0.0 } else { ($out.stdout | str trim | into float) }
+}
+
+def log-tail [log: string, n: int]: nothing -> list<string> {
+    let out: record = (do { ^tail -n $n $log } | complete)
+    if $out.exit_code != 0 { [] } else { $out.stdout | lines | where {|l| ($l | str trim) != "" } }
+}
+
+def scan [uid: string, j: record]: nothing -> record {
+    let probe: record = (do { ^launchctl print $"gui/($uid)/($j.label)" } | complete)
+    let running: bool = (($probe.exit_code == 0) and ($probe.stdout | lines | any {|l| $l =~ "state = running"}))
+    mut state: string = (if ($probe.exit_code != 0) { "not loaded" } else if $running { "RUNNING" } else { "idle" })
+    mut pid: int = 0
+    if $running {
+        let pidRows: list<string> = ($probe.stdout | lines | where {|l| ($l | str trim) =~ '^pid = \d+' })
+        if ($pidRows | is-not-empty) {
+            $pid = ($pidRows | get 0 | str trim | str replace -r 'pid = ' '' | into int)
+            let c1: float = (cpu-of $pid)
+            sleep 2sec
+            let c2: float = (cpu-of $pid)
+            let breathe: bool = (($c1 + $c2) > 5.0)
+            $state = (if $breathe { $"RUNNING alive cpu ($c1)/($c2)%" } else { $"STUCK SUSPECT cpu ($c1)/($c2)%" })
+        }
+    }
+    let full: list<string> = (log-tail $j.log 60)
+    # only the CURRENT run speaks: everything after the last build start —
+    # an older run's ✗ must not convict a newer success (measured brain).
+    let starts: list<int> = ($full | enumerate | where {|it| $it.item =~ '==>' } | get index)
+    let tail: list<string> = (if ($starts | is-empty) { $full } else { $full | skip ($starts | last) })
+    # Hard-wrap unbreakable tokens (the HikariPool class line lives here
+    # too) — same overflow-misalignment measured 21/11 in the chat cards.
+    let last: string = (if ($tail | is-empty) { "no log" } else { $tail | last })
+    let last: string = ($last | split row " "
+        | each {|t: any|
+            if ($t | str length) <= 35 { $t } else {
+                $t | split chars | chunks 35 | each {|c: any| $c | str join } | str join " "
+            }
+        }
+        | str join " ")
+    let marker: string = (if ($tail | any {|l| $l =~ '✗|BUILD FAILED' }) { "last run FAILED" } else if ($tail | any {|l| $l =~ '\bdone\b' }) { "last run done" } else { "running or unknown end" })
+    if ($j.log | path exists) {
+        let age: duration = ((date now) - (ls $j.log | get 0.modified))
+        {job: $j.job, state: $state, pid: $pid, written: $"($age) ago", marker: $marker, last: $last}
+    } else {
+        {job: $j.job, state: $state, pid: $pid, written: "no log file", marker: $marker, last: $last}
+    }
+}
+
+def main []: nothing -> nothing {
+    let uid: string = (^id -u | str trim)
+    let stamp: string = (date now | format date "%Y-%m-%d %H:%M:%S")
+    emit $"== deploy-status ($stamp) =="
+    let rows: list<record> = ($JOBS | each {|j| scan $uid $j })
+    emit ($rows | select job state pid written marker | table -w 90)
+    for r in $rows {
+        emit $"($r.job) last line: ($r.last | str substring 0..69)"
+    }
+    let stuck: int = ($rows | where {|r| $r.state =~ 'STUCK' } | length)
+    emit $"stuck suspects: ($stuck)"
+    if $stuck > 0 { exit 1 }
+}
