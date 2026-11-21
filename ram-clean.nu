@@ -1,18 +1,24 @@
 #!/opt/homebrew/bin/nu
-# ram-clean.nu — the RAM relief routine the owner asked for twice on 20/11.
+# ram-clean.nu — the RAM relief routine, DEEPENED on the owner's 21/11 ask
+# for a more intense, pattern-recognizing, maximum-recovery clean.
 # Default: PLAN ONLY (measures, names every candidate, frees nothing).
 # --clean executes, one decision per line, stdout AND the run log:
+#   0. the top-10 memory citizens — the pattern surface, shown every run
 #   1. idle Task-Island zcode-cli processes — cpu < 1%, never my own
 #      ancestry and never my session's own helper descendants
-#   2. the qwen2.5:1.5b extraction model unloaded from ollama RAM (NEVER
-#      deleted — the brain's memory worker reloads it on demand)
+#   2. ollama pattern: the brain's embedder (nomic-embed) STAYS, every
+#      other loaded model is stopped (stop != delete; they reload on demand)
 #   3. AppleSpell killed (macOS growth bug; respawns small on demand)
 #   4. idle gradle daemons killed (respawn on the next build; a BUILDING
 #      daemon breathes above the idle threshold and is never touched)
+#   5. the Logi Options+ family: reported with RSS totals and the web
+#      receipts — only its crash reporter is auto-killed; replacing the
+#      daemon is the owner's decision (measured ~1.0 GB across processes)
 # Every run appends to ~/Library/Logs/ram-clean.log.
 
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/ram-clean.log"
-const QWEN: string = "qwen2.5:1.5b"
+# The brain's embedder — the ONLY ollama model that stays loaded.
+const KEEP_OLLAMA: string = "nomic-embed"
 # cpu percent under which a process counts as idle. A live turn or an
 # active build breathes well above this; abandoned things sit at 0.
 const IDLE_CPU: float = 1.0
@@ -38,7 +44,7 @@ def pid-cpu [line: string]: nothing -> record {
     {pid: ($parts | get 0 | into int), cpu: ($parts | get 1 | into float)}
 }
 
-# The full ps snapshot as records (the builtin ps lacks pcpu and args).
+# The full ps snapshot as records (the builtin ps lacks pcpu and comm).
 def snap []: nothing -> table {
     ^ps -axo pid=,ppid=,pcpu=,comm=
     | lines
@@ -47,6 +53,17 @@ def snap []: nothing -> table {
         let t: string = ($l | str trim)
         let parts: list<string> = ($t | split row -r '\s+')
         {pid: ($parts | get 0 | into int), ppid: ($parts | get 1 | into int), cpu: ($parts | get 2 | into float), name: ($parts | get 3 | path basename)}
+    }
+}
+
+# RSS-aware snapshot: ps rss is KB; the owner reads MB.
+def rss-snap []: nothing -> table {
+    ^ps -axo rss=,pid=,pcpu=,comm=
+    | lines
+    | where {|l| ($l | str trim) != "" }
+    | each {|l|
+        let parts: list<string> = (($l | str trim) | split row -r '\s+')
+        {rssMb: (($parts | get 0 | into int) / 1024 | math round), pid: ($parts | get 1 | into int), cpu: ($parts | get 2 | into float), name: ($parts | get 3 | path basename)}
     }
 }
 
@@ -90,7 +107,11 @@ def main [--clean]: nothing -> nothing {
     let freeBefore: int = (free-pct)
     let swapBefore: string = (swap-line)
     emit $"== ram-clean ($stamp) — clean=($clean) =="
+
+    # 0. the pattern surface: who holds the memory right now.
     emit $"before: free ($freeBefore)% · swap ($swapBefore)"
+    emit "== top 10 memory citizens (MB) =="
+    emit (rss-snap | sort-by -r rssMb | first 10 | select name pid rssMb cpu | table)
 
     # 1. Task-Island zcode-cli processes.
     let isles: table = (islands $ps $prot)
@@ -100,14 +121,18 @@ def main [--clean]: nothing -> nothing {
         emit $"killed islands: ($isles | get pid | str join ', ')"
     }
 
-    # 2. the extraction model's resident RAM (stop != delete; it reloads).
+    # 2. ollama pattern: the brain's embedder stays, the rest reload on demand.
     let ops: record = (do { ollama ps } | complete)
-    let qwenLoaded: bool = ($ops.stdout | lines | any {|l| $l =~ $QWEN })
-    let qstate: string = (if $qwenLoaded { "loaded in RAM" } else { "not loaded" })
-    emit $"qwen ($QWEN): ($qstate)"
-    if $clean and $qwenLoaded {
-        let stop: record = (do { ollama stop $QWEN } | complete)
-        emit $"ollama stop ($QWEN): exit ($stop.exit_code)"
+    let loaded: list<string> = ($ops.stdout | lines | skip 1
+        | where {|l| ($l | str trim) != "" }
+        | each {|l| $l | str trim | split row -r '\s+' | get 0 })
+    let droppable: list<string> = ($loaded | where {|m| not ($m =~ $KEEP_OLLAMA) })
+    emit $"ollama loaded: ($loaded | str join ', ') — keep ($KEEP_OLLAMA), drop: ($droppable | str join ', ')"
+    if $clean and (($droppable | length) > 0) {
+        for m in $droppable {
+            let stop: record = (do { ollama stop $m } | complete)
+            emit $"ollama stop ($m): exit ($stop.exit_code)"
+        }
     }
 
     # 3. AppleSpell growth bug.
@@ -128,6 +153,27 @@ def main [--clean]: nothing -> nothing {
     if $clean and (($gradles | length) > 0) {
         kill ...($gradles | get pid)
         emit $"killed gradle daemons: ($gradles | get pid | str join ', ')"
+    }
+
+    # 5. the Logi Options+ family — report + only the crash reporter dies.
+    # macOS system processes (LoginItems, loginwindow, logind, login) also
+    # start with "logi" — measured false positives 21/11 that inflated the
+    # family total by >1 GB; exclude them explicitly.
+    let logi: table = (rss-snap | where {|r|
+        let low: string = ($r.name | str lowercase)
+        ($low =~ '^logi') and (not ($low =~ '^login'))
+    } | select name pid rssMb cpu)
+    if ($logi | is-empty) {
+        emit "logi family: not running"
+    } else {
+        emit ($logi | sort-by -r rssMb | table)
+        emit $"logi family total: ($logi | get rssMb | math sum) MB — the single biggest optional block on this 16 GB Mac"
+        emit "hint (web receipts 21/11): the daemon is a ~500 MB Electron app; alternatives = BetterMouse (paid), Mouser (open-source, HID++), LinguaX (native ~10 MB); or downgrade to 1.44.415778 with auto-updates OFF"
+        let crashpads: list<int> = ($logi | where name == "logi_crashpad_handler" | get pid)
+        if $clean and (($crashpads | length) > 0) {
+            kill ...$crashpads
+            emit "logi_crashpad_handler killed — it respawns when a crash needs reporting"
+        }
     }
 
     if $clean {
