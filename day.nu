@@ -12,9 +12,11 @@ const SCRIPTS: string = "/Users/lattenero/Scripts"
 
 $env.config.table.mode = "thin"
 
+use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+
+# One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
-    print $line
-    $"($line)\n" | save --append --raw $LOG_FILE
+    emit-to $LOG_FILE $line
 }
 
 def fleet-repos []: nothing -> list<string> {

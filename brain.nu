@@ -9,6 +9,14 @@
 #   brain --search "text"       search the brain's OWN memories
 #   brain --recent              the latest memories
 #   brain --save "text" --kind fact   write a memory (fact|decision|preference|summary)
+#
+# THE TWO-SIDED BRAIN (measured 21/11, the missed tool question): the
+# default mode retrieves over the INDEXED CORPUS (docs + code — atemporal
+# reference: "how does X work"); event and conversation questions live on
+# the MEMORY side (--search / --recent). The memories are ENGLISH (the
+# 19/11 normalization) — Spanish memory queries embed against language,
+# not content; query them in English. And it NEVER synthesizes prose:
+# retrieval only — for a spoken answer ask Z or the bot.
 # Every run appends to ~/Library/Logs/brain.log.
 
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/brain.log"
@@ -17,17 +25,20 @@ const KINDS: list<string> = [fact decision preference summary]
 
 $env.config.table.mode = "thin"
 
+use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+
+# One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
-    print $line
-    $"($line)\n" | save --append --raw $LOG_FILE
+    emit-to $LOG_FILE $line
 }
 
 def rag-section [q: string, k: int, iterate: bool]: nothing -> nothing {
     emit $"== rag — ($q) =="
-    # argv list must be ALL strings — a bare int in the literal makes it
-    # list<oneof<string,int>> and the spread dies at parse (measured 21/11).
-    let cmd: list<string> = ([query $q --k $"($k)"] ++ (if $iterate { ["--iterate"] } else { [] }))
-    let out: record = (do { ^$BRAIN ...$cmd } | complete)
+    # The HTTP /rag/query over the CLI `query`: it carries the bilingual
+    # ES→EN QueryExpansion leg + RRF fusion the CLI lacks — Spanish corpus
+    # questions were score-floor noise through the CLI (measured 21/11).
+    let body: string = ({query: $q, k: $k, iterate: $iterate} | to json)
+    let out: record = (do { ^curl -s -X POST -H 'Content-Type: application/json' -d $body http://127.0.0.1:8765/rag/query } | complete)
     if $out.exit_code != 0 {
         emit $"query failed — ($out.stderr | str substring 0..119)"
         return
@@ -117,7 +128,7 @@ def dispatch-table [k: int]: nothing -> record {
         search: {|c| search-section $c.text $k}
         save: {|c| save-section $c.kind $c.text}
         recent: {|c| recent-section $k}
-        usage: {|c| emit 'usage: brain "question" | brain "q" --iterate | --search "text" | --save "text" --kind fact | --recent'}
+        usage: {|c| emit 'corpus reference lookups: brain "how does X work" · event/conversation lookups: brain --search "what happened" (memories are ENGLISH — query in English) · --save t --kind K · --recent'}
     }
 }
 

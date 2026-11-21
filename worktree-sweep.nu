@@ -17,9 +17,11 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/worktree-sweep.log"
 $env.config.table.mode = "thin"
 const PROTECTED: list<string> = [master main damian develop]
 
+use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+
+# One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
-    print $line
-    $"($line)\n" | save --append --raw $LOG_FILE
+    emit-to $LOG_FILE $line
 }
 
 def repos []: nothing -> list<string> {

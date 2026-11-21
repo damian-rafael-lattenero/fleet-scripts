@@ -23,9 +23,11 @@ const KEEP_OLLAMA: string = "nomic-embed"
 # active build breathes well above this; abandoned things sit at 0.
 const IDLE_CPU: float = 1.0
 
+use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+
+# One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
-    print $line
-    $"($line)\n" | save --append --raw $LOG_FILE
+    emit-to $LOG_FILE $line
 }
 
 # "System-wide memory free percentage: 64%" → 64.

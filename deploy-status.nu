@@ -19,9 +19,12 @@ const JOBS: list<record> = [
     {job: "fork", label: "com.zcode.deploy-fork", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-fork.log"}
 ]
 
+use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+
+# One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
-    print $line
-    $"($line)\n" | save --append --raw $LOG_FILE
+    emit-to $LOG_FILE $line
 }
 
 def cpu-of [pid: int]: nothing -> float {
@@ -56,15 +59,8 @@ def scan [uid: string, j: record]: nothing -> record {
     let starts: list<int> = ($full | enumerate | where {|it| $it.item =~ '==>' } | get index)
     let tail: list<string> = (if ($starts | is-empty) { $full } else { $full | skip ($starts | last) })
     # Hard-wrap unbreakable tokens (the HikariPool class line lives here
-    # too) — same overflow-misalignment measured 21/11 in the chat cards.
-    let last: string = (if ($tail | is-empty) { "no log" } else { $tail | last })
-    let last: string = ($last | split row " "
-        | each {|t: any|
-            if ($t | str length) <= 35 { $t } else {
-                $t | split chars | chunks 35 | each {|c: any| $c | str join } | str join " "
-            }
-        }
-        | str join " ")
+    # too) — the shared mod does the chunking.
+    let last: string = (if ($tail | is-empty) { "no log" } else { hard-wrap ($tail | last) 35 })
     let marker: string = (if ($tail | any {|l| $l =~ '✗|BUILD FAILED' }) { "last run FAILED" } else if ($tail | any {|l| $l =~ '\bdone\b' }) { "last run done" } else { "running or unknown end" })
     if ($j.log | path exists) {
         let age: duration = ((date now) - (ls $j.log | get 0.modified))

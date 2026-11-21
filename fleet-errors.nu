@@ -30,30 +30,17 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/fleet-errors.log"
 # the script itself (measured 21/11).
 $env.config.table.mode = "thin"
 
-# One voice for stdout AND the run log (the fleet family contract).
+use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+
+# One voice for stdout AND the run log (the fleet family contract) — the
+# shared mod does the work.
 def emit [line: string]: nothing -> nothing {
-    print $line
-    $"($line)\n" | save --append --raw $LOG_FILE
+    emit-to $LOG_FILE $line
 }
 
 def trim100 [s: string]: nothing -> string {
     if ($s | str length) > 100 { $s | str substring 0..99 } else { $s }
-}
-
-# Stack-trace class tokens (60-70 chars, ZERO spaces) overflow their cell at
-# narrow render widths; the chat card then soft-wraps the WHOLE table line
-# and every border below misaligns (measured 21/11, ZCode tool cards).
-# Hard-wrap any token longer than max into newline-chunks — builtins only:
-# split chars → chunks → join.
-def hard-wrap [s: string, max: int]: nothing -> string {
-    $s
-    | split row " "
-    | each {|t: any|
-        if ($t | str length) <= $max { $t } else {
-            $t | split chars | chunks $max | each {|c: any| $c | str join } | str join " "
-        }
-    }
-    | str join " "
 }
 
 def scan-log [entry: record, tailN: int, cutoff: datetime]: nothing -> record {
