@@ -62,13 +62,13 @@ def main []: nothing -> nothing {
     let stamp: string = (date now | format date "%Y-%m-%d %H:%M")
     emit $"== brain-eval ($stamp) — ($CASES | length) questions =="
     let rows: list<record> = ($CASES | each {|c| run-case $c })
-    emit ($rows | select q surface ok xfail score top | table -w 160)
+    emit ($rows | select q surface ok xfail score top | table -w 85)
     let passN: int = ($rows | where ok | length)
     let failN: int = (($rows | length) - $passN)
     emit $"PASS ($passN) · FAIL ($failN)"
     if $failN > 0 {
         emit "== the failures =="
-        emit ($rows | where {|r| not $r.ok } | select q surface top | table -w 160)
+        emit ($rows | where {|r| not $r.ok } | select q surface top | table -w 85)
         exit 1
     }
 }

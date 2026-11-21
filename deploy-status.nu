@@ -75,7 +75,7 @@ def main []: nothing -> nothing {
     let stamp: string = (date now | format date "%Y-%m-%d %H:%M:%S")
     emit $"== deploy-status ($stamp) =="
     let rows: list<record> = ($JOBS | each {|j| scan $uid $j })
-    emit ($rows | select job state pid written marker | table -w 90)
+    emit ($rows | select job state pid written marker | table -w 85)
     for r in $rows {
         emit $"($r.job) last line: ($r.last | str substring 0..69)"
     }

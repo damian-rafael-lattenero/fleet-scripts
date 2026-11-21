@@ -84,7 +84,7 @@ def main [
         emit "no errors found in any fleet log"
         exit 0
     }
-    emit ($withErrs | select log errors fresh last | sort-by -r fresh errors | table -w 90)
+    emit ($withErrs | select log errors fresh last | sort-by -r fresh errors | table -w 85)
     let freshN: int = ($rows | get fresh | math sum)
     emit $"fresh errors in the window: ($freshN)"
     if $freshN > 0 { exit 1 }

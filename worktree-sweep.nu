@@ -100,7 +100,7 @@ def main [--clean, --remote]: nothing -> nothing {
     emit $"fleet repos: ($repos | length)"
     let rows: list<record> = ($repos | each {|r| audit $r } | flatten)
     let cleanable: list<record> = ($rows | where {|r| $r.action =~ 'able' })
-    emit ($rows | where {|r| $r.action != "KEEP" } | table -w 90)
+    emit ($rows | where {|r| $r.action != "KEEP" } | table -w 85)
     let keeps: int = ($rows | where action == KEEP | length)
     emit $"keeps — not merged or dirty: ($keeps)"
     if ($cleanable | is-empty) {
