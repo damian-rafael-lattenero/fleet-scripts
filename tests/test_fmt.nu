@@ -19,4 +19,11 @@ assert equal (human-num 300000000) "300M"
 assert equal (human-num 2000000) "2M"
 assert equal (human-num 2100000) "2.1M"
 
+# hard-wrap: the unbreakable-token chunker (spaces, never newlines)
+assert equal (hard-wrap "short token" 35) "short token"
+assert equal (hard-wrap "com.zaxxer.hikari.pool.HikariPool.createTimeoutException" 35) "com.zaxxer.hikari.pool.HikariPool.c reateTimeoutException"
+assert equal (hard-wrap "at com.zaxxer.hikari.pool.HikariPool.createTimeoutException(HikariPool.java:714)" 35) "at com.zaxxer.hikari.pool.HikariPool.c reateTimeoutException(HikariPool.ja va:714)"
+assert equal (hard-wrap "ab" 1) "a b"
+assert equal (hard-wrap "" 35) ""
+
 print "test_fmt ok"

@@ -118,6 +118,13 @@ in traverse-option / fold-result.
 | function | type | summary |
 |---|---|---|
 | `human-num` | `x: int -> string` | the raw -> K -> M ladder (American system); M fires AT the boundary — 1000000 is "1M", never "1000K"; trailing zeros trimmed |
+| `hard-wrap` | `s: string, max: int -> string` | chunks any token longer than max into space-separated pieces — a wide table cell never holds an unbreakable run (stack-trace class tokens); spaces never newlines (explicit newlines in cells + `-w` break nu's width calc) |
+
+### mods/log.nu — the fleet-script receipt voice
+
+| function | type | summary |
+|---|---|---|
+| `emit-to` | `log: path, line: string -> nothing` | one voice for stdout AND the run log: what the user sees is appended (with newline) to the script's own `~/Library/Logs/<name>.log` — the receipt survives the terminal. The fleet family's contract: every script keeps a thin local `emit` delegating here with its const `LOG_FILE` |
 
 ### mods/highlight.nu — terminal syntax highlighting (gap over builtins)
 
