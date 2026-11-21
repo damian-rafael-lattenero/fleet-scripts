@@ -74,20 +74,27 @@ def rss-snap []: nothing -> table {
 }
 
 # Family grouping: an Electron app is 20+ helper processes; the leaks show
-# per FAMILY, not per pid.
+# per FAMILY, not per pid. The mapping is DATA — a priority-ordered
+# predicate table (the anti-patterns law: chains die, precedence lives in
+# row order). The login row sits FIRST so macOS system processes
+# (LoginItems, loginwindow, logind) pass through ungrouped before the logi
+# row can claim them — rust regex has no lookahead, row precedence does the
+# job. family: null = pass through with the raw name.
+def family-table []: nothing -> list<record> {
+    [
+        {pattern: '^login', family: null}
+        {pattern: '^zcode', family: "zcode-family"}
+        {pattern: '^logi', family: "logi-family"}
+        {pattern: '^google', family: "chrome-family"}
+        {pattern: 'llama-server', family: "ollama-runners"}
+        {pattern: '', family: null}
+    ]
+}
+
 def family-of [name: string]: nothing -> string {
     let low: string = ($name | str lowercase)
-    if ($low =~ '^zcode') {
-        "zcode-family"
-    } else if (($low =~ '^logi') and (not ($low =~ '^login'))) {
-        "logi-family"
-    } else if ($low =~ '^google') {
-        "chrome-family"
-    } else if ($low =~ 'llama-server') {
-        "ollama-runners"
-    } else {
-        $name
-    }
+    let hit: record = (family-table | where {|row| $low =~ $row.pattern } | first)
+    ($hit.family | default $name)
 }
 
 # The families aggregated (sum RSS + process count), the biggest first.
