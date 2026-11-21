@@ -126,6 +126,29 @@ in traverse-option / fold-result.
 |---|---|---|
 | `emit-to` | `log: path, line: string -> nothing` | one voice for stdout AND the run log: what the user sees is appended (with newline) to the script's own `~/Library/Logs/<name>.log` — the receipt survives the terminal. The fleet family's contract: every script keeps a thin local `emit` delegating here with its const `LOG_FILE` |
 
+### mods/lazy.nu — deference in a strict shell (the defer law)
+
+Nushell is EAGER: `let x = expensive` evaluates NOW — no thunks, no lazy
+lists at binding time. What the shell HAS (measured live 0.117): closures
+are thunks, `and`/`or` short-circuit (the right side skips), pipelines
+stream end to end (`seq 1 5000000 | first 3` = 789µs), and guards precede
+builds. This module formalizes the lazy-record idiom the healthcheck legs
+live by. THE LAW: defer expensive or conditional work in closures; force
+only at the point of use. ANTI-LAW: premature laziness — an always-used
+value builds eagerly and correctly.
+
+| function | type | summary |
+|---|---|---|
+| `thunk` | `body: closure -> record` | wrap a closure into the lazy record `{f: body}` — building is free, nothing runs |
+| `force` | `t: record -> any` | run the thunk's closure NOW and return the result (re-force runs again — caching is the caller's policy, the stdlib stays stateless) |
+| `force-with` | `t: record, arg: any -> any` | the deferred function receives its argument (a deferred CALL, not just a deferred value) |
+
+```nu
+use ~/Projects/nushell-fp/mods/lazy.nu *
+let report = thunk {|| open data.csv | group-by region | each {|g| ...} }
+if $needs_report { force $report }   # built only when actually asked
+```
+
 ### mods/highlight.nu — terminal syntax highlighting (gap over builtins)
 
 `nu-highlight` is the only Nushell highlighter and it speaks nothing else;
