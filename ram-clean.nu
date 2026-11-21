@@ -17,6 +17,10 @@
 # Every run appends to ~/Library/Logs/ram-clean.log.
 
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/ram-clean.log"
+# The leak ledger: one JSONL snapshot per run (families + free + swap), so
+# the NEXT run can compute the growth — a leak is memory that CREATES ITSELF
+# between runs and never comes back.
+const SNAP_FILE: string = "/Users/lattenero/Library/Logs/ram-snapshots.jsonl"
 # The brain's embedder — the ONLY ollama model that stays loaded.
 const KEEP_OLLAMA: string = "nomic-embed"
 # cpu percent under which a process counts as idle. A live turn or an
@@ -69,6 +73,105 @@ def rss-snap []: nothing -> table {
     }
 }
 
+# Family grouping: an Electron app is 20+ helper processes; the leaks show
+# per FAMILY, not per pid.
+def family-of [name: string]: nothing -> string {
+    let low: string = ($name | str lowercase)
+    if ($low =~ '^zcode') {
+        "zcode-family"
+    } else if (($low =~ '^logi') and (not ($low =~ '^login'))) {
+        "logi-family"
+    } else if ($low =~ '^google') {
+        "chrome-family"
+    } else if ($low =~ 'llama-server') {
+        "ollama-runners"
+    } else {
+        $name
+    }
+}
+
+# The families aggregated (sum RSS + process count), the biggest first.
+def families []: nothing -> table {
+    rss-snap
+    | insert family {|r| family-of $r.name }
+    | group-by family
+    | items {|k, v| {family: $k, rssMb: ($v | get rssMb | math sum), n: ($v | length)} }
+    | sort-by -r rssMb
+}
+
+# Append this run's snapshot to the JSONL ledger and return it.
+def snapshot-write [boot: int, free: int, swapUsedMb: int]: nothing -> record {
+    let fams: table = (families | first 60)
+    let rec: record = {
+        stamp: (date now | format date "%Y-%m-%d %H:%M:%S")
+        boot: $boot
+        free: $free
+        swapUsedMb: $swapUsedMb
+        procs: ($fams | each {|f| {family: $f.family, rssMb: $f.rssMb, n: $f.n} })
+    }
+    (($rec | to json -r) + (char nl)) | save --append --raw $SNAP_FILE
+    $rec
+}
+
+# The last snapshot in the ledger — null when this is the first run.
+def last-snapshot []: nothing -> any {
+    if not ($SNAP_FILE | path exists) { return null }
+    let lines: list<string> = (open --raw $SNAP_FILE | lines | where {|l| ($l | str trim) != "" })
+    if ($lines | is-empty) { return null }
+    try { $lines | last | from json } catch { null }
+}
+
+# The first snapshot of the CURRENT boot — the since-boot growth baseline.
+def boot-snapshot [boot: int]: nothing -> any {
+    if not ($SNAP_FILE | path exists) { return null }
+    let lines: list<string> = (open --raw $SNAP_FILE | lines | where {|l| ($l | str trim) != "" })
+    let rows: list<record> = ($lines | each {|l| try { $l | from json } catch { null } } | compact)
+    let sameBoot: list<record> = ($rows | where boot == $boot)
+    if ($sameBoot | is-empty) { null } else { $sameBoot | first }
+}
+
+# The per-family RSS lookup of one snapshot — 0 when the family is absent
+# (killed by the previous clean, or born after it).
+def fam-rss [snap: record, family: string]: nothing -> int {
+    let hit: list<record> = ($snap.procs | where {|p| $p.family == $family })
+    if ($hit | is-empty) { 0 } else { $hit | first | get rssMb }
+}
+
+# The leak detector: growth since the last run AND since the boot, per
+# family, flagged at the thresholds. A null snapshot = first run = baseline.
+def leak-report [
+    now: table, prev: any, bootSnap: any,
+    leakRunMb: int, leakBootMb: int, swapUsedMb: int,
+]: nothing -> nothing {
+    let prevSwap: int = (if $prev != null { $prev.swapUsedMb? | default 0 } else { $swapUsedMb })
+    let bootSwap: int = (if $bootSnap != null { $bootSnap.swapUsedMb? | default 0 } else { $swapUsedMb })
+    if $prev == null {
+        emit "leak ledger: baseline captured — run again later and the growth per family appears here"
+        emit $"swap used now: ($swapUsedMb) MB"
+        return
+    }
+    let rows: list<record> = ($now
+        | each {|f|
+            let before: int = (if $prev != null { fam-rss $prev $f.family } else { 0 })
+            let atBoot: int = (if $bootSnap != null { fam-rss $bootSnap $f.family } else { 0 })
+            {
+                family: $f.family
+                nowMb: $f.rssMb
+                runDelta: ($f.rssMb - $before)
+                bootDelta: ($f.rssMb - $atBoot)
+            }
+        }
+        | where {|r| ($r.runDelta >= $leakRunMb) or ($r.bootDelta >= $leakBootMb) }
+        | sort-by -r bootDelta)
+    emit $'== leak suspects — runΔ ≥ ($leakRunMb) MB · bootΔ ≥ ($leakBootMb) MB =='
+    if ($rows | is-empty) {
+        emit "no family grew at the leak thresholds — memory is stable"
+    } else {
+        emit ($rows | table)
+        emit $"swap used: ($swapUsedMb) MB — runΔ ($swapUsedMb - $prevSwap) MB · since boot +($swapUsedMb - $bootSwap) MB"
+    }
+}
+
 # My ancestor chain + ALL its descendants (my session's own MCP helpers).
 # Siblings of my ancestors (other Task Islands) are deliberately NOT here.
 def protect-set [ps: table]: nothing -> list<int> {
@@ -102,13 +205,32 @@ def islands [ps: table, prot: list<int>]: nothing -> table {
     | where {|r| (not ($r.pid in $prot)) and ($r.cpu < $IDLE_CPU) }
 }
 
-def main [--clean]: nothing -> nothing {
+# "total = 4096.00M used = 2434.00M free = ..." → the used MB as int.
+def swap-used-mb []: nothing -> int {
+    let line: string = (^sysctl -n vm.swapusage | str trim)
+    let used: string = ($line | split row "used = " | get 1 | split row "M" | get 0 | str trim)
+    ($used | into int)
+}
+
+def main [
+    --clean
+    --leak-run-mb: int = 30   # family growth since the LAST run that flags a leak
+    --leak-boot-mb: int = 150 # family growth since the BOOT that flags a leak
+]: nothing -> nothing {
     let stamp: string = (date now | format date "%Y-%m-%d %H:%M:%S")
     let ps: table = (snap)
     let prot: list<int> = (protect-set $ps)
     let freeBefore: int = (free-pct)
     let swapBefore: string = (swap-line)
+    let boot: int = (^sysctl -n kern.boottime | parse -r 'sec = (?<sec>\d+)' | get 0.sec | into int)
+    let swapUsed: int = (swap-used-mb)
     emit $"== ram-clean ($stamp) — clean=($clean) =="
+
+    # -1. the leak ledger: snapshot now, diff against the last run and the boot.
+    let prev: any = (last-snapshot)
+    let bootSnap: any = (boot-snapshot $boot)
+    let snap: record = (snapshot-write $boot $freeBefore $swapUsed)
+    leak-report (families) $prev $bootSnap $leak_run_mb $leak_boot_mb $swapUsed
 
     # 0. the pattern surface: who holds the memory right now.
     emit $"before: free ($freeBefore)% · swap ($swapBefore)"
@@ -157,7 +279,18 @@ def main [--clean]: nothing -> nothing {
         emit $"killed gradle daemons: ($gradles | get pid | str join ', ')"
     }
 
-    # 5. the Logi Options+ family — report + only the crash reporter dies.
+    # 5. LoginItems — the macOS host of the login-item daemons (the Logi
+    #    services live INSIDE it). Measured 21/11: 1163 MB at 13:15 → 1549 MB
+    #    at 19:11 with 100% cpu — THE felt leak. A restart respawns it clean.
+    let loginItems: list<int> = ($ps | where name == "LoginItems" | get pid)
+    let liRss: int = (rss-snap | where name == "LoginItems" | get -o 0 | default {rssMb: 0} | get -o rssMb | default 0)
+    emit $"LoginItems — the login-item host where the Logi services live: ($liRss) MB"
+    if $clean and (($loginItems | length) > 0) {
+        kill ...$loginItems
+        emit "LoginItems restarted — it respawns clean and the login-item daemons come back with it"
+    }
+
+    # 6. the Logi Options+ family — report + only the crash reporter dies.
     # macOS system processes (LoginItems, loginwindow, logind, login) also
     # start with "logi" — measured false positives 21/11 that inflated the
     # family total by >1 GB; exclude them explicitly.
