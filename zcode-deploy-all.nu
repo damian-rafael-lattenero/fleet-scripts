@@ -5,12 +5,18 @@
 # (~25 min; the fork alone is 15-20); the wave costs the MAX.
 #
 # Why parallel is safe (the couplings are transient BY DESIGN):
-#   - artifacts: NONE — 4 repos, 4 builds, 4 LaunchAgents (the two gradle
-#     builds use separate per-project daemons; the fork build is pnpm/turbo)
+#   - artifacts: NONE — 4 repos, 4 builds, 4 LaunchAgents (the THREE gradle
+#     builds use separate per-project daemons and contend briefly on the
+#     machine-wide journal lock — measured 17/11; the fork build is
+#     pnpm/turbo)
 #   - runtime: the fork swap reopens the app while the bots reconnect on
 #     their own (bot-healer + socket retry); a mid-restart brain makes
 #     memory-recall degrade honestly (2s deadline, silence on down) — it
 #     never breaks a deploy
+#   - KNOWN TRADE (measured 23:12 wave): 3 gradle builds + pnpm at once
+#     pushed load to 28 and the bot's 45s verification failed once — the
+#     wave is faster but saturation-timeout prone; the staggered-gradle
+#     variant is the proposed fix if the timeouts repeat
 #
 # LIVE OUTPUT (measured 17/11 — owner's ask): a nushell `job` runs with its
 # stdout handle swapped, so anything a job prints is INVISIBLE until the job
