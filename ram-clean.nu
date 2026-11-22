@@ -16,6 +16,9 @@
 #   5. the Logi Options+ family: reported with RSS totals and the web
 #      receipts — only its crash reporter is auto-killed; replacing the
 #      daemon is the owner's decision (measured ~1.0 GB across processes)
+#   6. receipts pass (after --clean): every kill re-verified against a
+#      fresh ps — dead / SURVIVED / respawned-on-demand, LoginItems'
+#      respawn measured against its pre-kill size, ollama re-listed
 # Every run appends to ~/Library/Logs/ram-clean.log.
 # --trend is a READ-ONLY mode: the ledger's history as a time series (per
 # family first→last, Δ, and upRuns — how many runs it only went UP), no
@@ -397,10 +400,11 @@ def main [
     for h in $scan.held {
         emit $"island held: ($h.pid) — descendant ($h.breatherPid) breathes at ($h.breatherCpu)% — not killed"
     }
-    if $clean and (($scan.killable | length) > 0) {
+    let isleKills: list<int> = (if $clean and (($scan.killable | length) > 0) {
         kill ...($scan.killable | get pid)
         emit $"killed islands: ($scan.killable | get pid | str join ', ')"
-    }
+        $scan.killable | get pid
+    } else { [] })
 
     # 2. ollama pattern: the brain's embedder stays, the rest reload on demand.
     let ops: record = (do { ollama ps } | complete)
@@ -409,20 +413,22 @@ def main [
         | each {|l| $l | str trim | split row -r '\s+' | get 0 })
     let droppable: list<string> = ($loaded | where {|m| not ($m =~ $KEEP_OLLAMA) })
     emit $"ollama loaded: ($loaded | str join ', ') — keep ($KEEP_OLLAMA), drop: ($droppable | str join ', ')"
-    if $clean and (($droppable | length) > 0) {
+    let droppedModels: list<string> = (if $clean and (($droppable | length) > 0) {
         for m in $droppable {
             let stop: record = (do { ollama stop $m } | complete)
             emit $"ollama stop ($m): exit ($stop.exit_code)"
         }
-    }
+        $droppable
+    } else { [] })
 
     # 3. AppleSpell growth bug.
     let spell: list<int> = ($ps | where name == "AppleSpell" | get pid)
     emit $"AppleSpell: ($spell | str join ', ')"
-    if $clean and (($spell | length) > 0) {
+    let spellKills: list<int> = (if $clean and (($spell | length) > 0) {
         kill ...$spell
         emit "AppleSpell killed — it respawns small on demand"
-    }
+        $spell
+    } else { [] })
 
     # 4. idle gradle daemons (an ACTIVE build breathes above the threshold).
     let gradles: list<CpuRow> = (^ps -axo pid=,pcpu=,args=
@@ -431,10 +437,11 @@ def main [
         | each {|l| pid-cpu $l }
         | where {|r| $r.cpu < $IDLE_CPU })
     emit $"idle gradle daemons: ($gradles | length) — pids ($gradles | get pid | str join ', ')"
-    if $clean and (($gradles | length) > 0) {
+    let gradleKills: list<int> = (if $clean and (($gradles | length) > 0) {
         kill ...($gradles | get pid)
         emit $"killed gradle daemons: ($gradles | get pid | str join ', ')"
-    }
+        $gradles | get pid
+    } else { [] })
 
     # 5. LoginItems — the macOS host of the login-item daemons (the Logi
     #    services live INSIDE it). Measured 21/11: 1163 MB at 13:15 → 1549 MB
@@ -442,10 +449,11 @@ def main [
     let loginItems: list<int> = ($ps | where name == "LoginItems" | get pid)
     let liRss: int = (rss-snap | where name == "LoginItems" | get -o 0 | default {rssMb: 0} | get -o rssMb | default 0)
     emit $"LoginItems — the login-item host where the Logi services live: ($liRss) MB"
-    if $clean and (($loginItems | length) > 0) {
+    let loginKills: list<int> = (if $clean and (($loginItems | length) > 0) {
         kill ...$loginItems
         emit "LoginItems restarted — it respawns clean and the login-item daemons come back with it"
-    }
+        $loginItems
+    } else { [] })
 
     # 6. the Logi Options+ family — report + only the crash reporter dies.
     # macOS system processes (LoginItems, loginwindow, logind, login) also
@@ -461,15 +469,70 @@ def main [
         emit ($logi | sort-by -r rssMb | table)
         emit $"logi family total: ($logi | get rssMb | math sum) MB — the single biggest optional block on this 16 GB Mac"
         emit "hint (web receipts 21/11): the daemon is a ~500 MB Electron app; alternatives = BetterMouse (paid), Mouser (open-source, HID++), LinguaX (native ~10 MB); or downgrade to 1.44.415778 with auto-updates OFF"
-        let crashpads: list<int> = ($logi | where name == "logi_crashpad_handler" | get pid)
-        if $clean and (($crashpads | length) > 0) {
-            kill ...$crashpads
-            emit "logi_crashpad_handler killed — it respawns when a crash needs reporting"
-        }
     }
+    # Only the crash reporter dies — hoisted out of the report branch so
+    # the receipts pass below can see what was killed.
+    let crashpads: list<int> = ($logi | where name == "logi_crashpad_handler" | get pid)
+    let crashpadKills: list<int> = (if $clean and (($crashpads | length) > 0) {
+        kill ...$crashpads
+        emit "logi_crashpad_handler killed — it respawns when a crash needs reporting"
+        $crashpads
+    } else { [] })
 
     if $clean {
         sleep 2sec
+        # The receipts pass: every kill re-verified against a fresh
+        # external-ps snapshot (the builtin ps's pid column lies — the
+        # process-liveness law; snap is the measured truth) — dead is a
+        # receipt, SURVIVED is named, respawned-by-design is the new
+        # state (LoginItems must come back SMALL).
+        let ps2: list<PsRow> = (snap)
+        let deadCheck: closure = {|label: string, pids: list<int>|
+            if ($pids | is-empty) { "" } else {
+                let alive: list<int> = ($ps2 | where pid in $pids | get pid)
+                if ($alive | is-empty) {
+                    $"($label): ($pids | length) killed → verified dead"
+                } else {
+                    $"($label): SURVIVED — still alive: ($alive | str join ', ')"
+                }
+            }
+        }
+        for line in [(do $deadCheck "islands" $isleKills) (do $deadCheck "gradle daemons" $gradleKills)] {
+            if ($line != "") { emit $line }
+        }
+        let respawnCheck: closure = {|label: string, pids: list<int>, name: string|
+            if ($pids | is-empty) { "" } else {
+                let nowPids: list<int> = ($ps2 | where name == $name | get pid)
+                if ($nowPids | is-empty) {
+                    $"($label): killed → gone — respawns on demand"
+                } else {
+                    $"($label): killed → already respawned — pids ($nowPids | str join ', ')"
+                }
+            }
+        }
+        for line in [(do $respawnCheck "AppleSpell" $spellKills "AppleSpell") (do $respawnCheck "logi crashpad" $crashpadKills "logi_crashpad_handler")] {
+            if ($line != "") { emit $line }
+        }
+        if not ($loginKills | is-empty) {
+            let liRss2: int = (rss-snap | where name == "LoginItems" | get -o 0 | default {rssMb: 0} | get -o rssMb | default 0)
+            if ($liRss2 == 0) {
+                emit "LoginItems: killed → not yet respawned after 2s — launchd brings it back"
+            } else {
+                emit $"LoginItems: killed → respawned at ($liRss2) MB — was ($liRss) MB"
+            }
+        }
+        if not ($droppedModels | is-empty) {
+            let ops2: record = (do { ollama ps } | complete)
+            let loaded2: list<string> = ($ops2.stdout | lines | skip 1
+                | where {|l| ($l | str trim) != "" }
+                | each {|l| $l | str trim | split row -r '\s+' | get 0 })
+            let stillLoaded: list<string> = ($loaded2 | where {|m| $m in $droppedModels })
+            if ($stillLoaded | is-empty) {
+                emit $"ollama: ($droppedModels | str join ', ') → verified unloaded"
+            } else {
+                emit $"ollama: still loaded after stop: ($stillLoaded | str join ', ')"
+            }
+        }
         let freeAfter: int = (free-pct)
         let swapAfter: string = (swap-line)
         emit $"after: free ($freeAfter)% · swap ($swapAfter)"
