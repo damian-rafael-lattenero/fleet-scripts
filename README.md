@@ -126,6 +126,17 @@ in traverse-option / fold-result.
 |---|---|---|
 | `emit-to` | `log: path, line: string -> nothing` | one voice for stdout AND the run log: what the user sees is appended (with newline) to the script's own `~/Library/Logs/<name>.log` — the receipt survives the terminal. The fleet family's contract: every script keeps a thin local `emit` delegating here with its const `LOG_FILE` |
 
+### mods/proc.nu — the process-edge helpers
+
+The `complete` record is the boundary where externals hand their result
+back — and its `stderr` shape is NOT stable (string or list of lines,
+measured). One fold, everywhere, so an error path never crashes folding
+the very error it is trying to show.
+
+| function | type | summary |
+|---|---|---|
+| `fold-stderr` | `run: record -> string` | fold a complete record's stderr (string \| list-of-lines) into one text; missing/null = "" — the 15/11 drill trap, one source |
+
 ### mods/lazy.nu — deference in a strict shell (the defer law)
 
 Nushell is EAGER: `let x = expensive` evaluates NOW — no thunks, no lazy
