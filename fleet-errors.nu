@@ -6,7 +6,12 @@
 # Honest limit: a silent stop (a log that just quits writing) has no error
 # line to find — that is deploy liveness territory, not log triage.
 
-const LOGS: list<record> = [
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name.
+type LogTarget = record<name: string, path: string>
+type LogScan = record<log: string, errors: int, fresh: int, last: string>
+
+const LOGS: list<LogTarget> = [
     {name: "bot out", path: "/Users/lattenero/.zcode/bot-kotlin/logs/launchd.out.log"}
     {name: "bot err", path: "/Users/lattenero/.zcode/bot-kotlin/logs/launchd.err.log"}
     {name: "bot daemon", path: "/Users/lattenero/.zcode/bot-kotlin/logs/daemon.jsonl"}
@@ -43,7 +48,7 @@ def trim100 [s: string]: nothing -> string {
     if ($s | str length) > 100 { $s | str substring 0..99 } else { $s }
 }
 
-def scan-log [entry: record, tailN: int, cutoff: datetime]: nothing -> record {
+def scan-log [entry: LogTarget, tailN: int, cutoff: datetime]: nothing -> LogScan {
     let out: record = (do { ^tail -n $tailN $entry.path } | complete)
     if $out.exit_code != 0 {
         return {log: $entry.name, errors: 0, fresh: 0, last: "no file / unreadable"}
@@ -77,8 +82,8 @@ def main [
     --tail: int = 400          # lines scanned per log
 ]: nothing -> nothing {
     let cutoff: datetime = ((date now) - $since)
-    let rows: list<record> = ($LOGS | each {|e| scan-log $e $tail $cutoff })
-    let withErrs: list<record> = ($rows | where {|r| $r.errors > 0})
+    let rows: list<LogScan> = ($LOGS | each {|e| scan-log $e $tail $cutoff })
+    let withErrs: list<LogScan> = ($rows | where {|r| $r.errors > 0})
     emit $"== fleet errors — last ($tail) lines per log, fresh = within ($since) =="
     if ($withErrs | is-empty) {
         emit "no errors found in any fleet log"

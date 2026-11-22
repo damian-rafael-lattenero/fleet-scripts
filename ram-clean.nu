@@ -27,6 +27,18 @@ const KEEP_OLLAMA: string = "nomic-embed"
 # active build breathes well above this; abandoned things sit at 0.
 const IDLE_CPU: float = 1.0
 
+# The type aliases (the owner's 22/11 law): every shape reads once and the
+# signatures spell the name. The nullable family is oneof<string, nothing> —
+# a bare null literal against a plain `string` field fails the parse
+# (measured 22/11), `nothing` is the null arm that works.
+type PsRow = record<pid: int, ppid: int, cpu: float, name: string>
+type CpuRow = record<pid: int, cpu: float>
+type RssRow = record<rssMb: int, pid: int, cpu: float, name: string>
+type FamilyRule = record<pattern: string, family: oneof<string, nothing>>
+type FamilySum = record<family: string, rssMb: int, n: int>
+type LeakRow = record<family: string, nowMb: int, runDelta: int, bootDelta: int>
+type Snapshot = record<stamp: string, boot: int, free: int, swapUsedMb: int, procs: list<FamilySum>>
+
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
@@ -34,9 +46,14 @@ def emit [line: string]: nothing -> nothing {
     emit-to $LOG_FILE $line
 }
 
-# "System-wide memory free percentage: 64%" → 64.
+# "System-wide memory free percentage: 64%" → 64. A shape change of the
+# macOS output is a LOUD error, never a wrong number.
 def free-pct []: nothing -> int {
-    let line: string = (memory_pressure | lines | where {|l| $l =~ "memory free percentage"} | last)
+    let hits: list<string> = (memory_pressure | lines | where {|l| $l =~ "memory free percentage"})
+    if ($hits | is-empty) {
+        error make {msg: "memory_pressure output changed — no 'memory free percentage' line; the parse boundary broke"}
+    }
+    let line: string = ($hits | last)
     ($line | split row ":" | get 1 | str trim | str replace "%" "" | into int)
 }
 
@@ -44,14 +61,14 @@ def swap-line []: nothing -> string {
     ^sysctl -n vm.swapusage | str trim
 }
 
-def pid-cpu [line: string]: nothing -> record {
+def pid-cpu [line: string]: nothing -> CpuRow {
     let t: string = ($line | str trim)
     let parts: list<string> = ($t | split row -r '\s+')
     {pid: ($parts | get 0 | into int), cpu: ($parts | get 1 | into float)}
 }
 
 # The full ps snapshot as records (the builtin ps lacks pcpu and comm).
-def snap []: nothing -> table {
+def snap []: nothing -> list<PsRow> {
     ^ps -axo pid=,ppid=,pcpu=,comm=
     | lines
     | where {|l| ($l | str trim) != "" }
@@ -63,7 +80,7 @@ def snap []: nothing -> table {
 }
 
 # RSS-aware snapshot: ps rss is KB; the owner reads MB.
-def rss-snap []: nothing -> table {
+def rss-snap []: nothing -> list<RssRow> {
     ^ps -axo rss=,pid=,pcpu=,comm=
     | lines
     | where {|l| ($l | str trim) != "" }
@@ -80,7 +97,7 @@ def rss-snap []: nothing -> table {
 # (LoginItems, loginwindow, logind) pass through ungrouped before the logi
 # row can claim them — rust regex has no lookahead, row precedence does the
 # job. family: null = pass through with the raw name.
-def family-table []: nothing -> list<record> {
+def family-table []: nothing -> list<FamilyRule> {
     [
         {pattern: '^login', family: null}
         {pattern: '^zcode', family: "zcode-family"}
@@ -93,12 +110,12 @@ def family-table []: nothing -> list<record> {
 
 def family-of [name: string]: nothing -> string {
     let low: string = ($name | str lowercase)
-    let hit: record = (family-table | where {|row| $low =~ $row.pattern } | first)
+    let hit: FamilyRule = (family-table | where {|row| $low =~ $row.pattern } | first)
     ($hit.family | default $name)
 }
 
 # The families aggregated (sum RSS + process count), the biggest first.
-def families []: nothing -> table {
+def families []: nothing -> list<FamilySum> {
     rss-snap
     | insert family {|r| family-of $r.name }
     | group-by family
@@ -107,9 +124,9 @@ def families []: nothing -> table {
 }
 
 # Append this run's snapshot to the JSONL ledger and return it.
-def snapshot-write [boot: int, free: int, swapUsedMb: int]: nothing -> record {
-    let fams: table = (families | first 60)
-    let rec: record = {
+def snapshot-write [boot: int, free: int, swapUsedMb: int]: nothing -> Snapshot {
+    let fams: list<FamilySum> = (families | first 60)
+    let rec: Snapshot = {
         stamp: (date now | format date "%Y-%m-%d %H:%M:%S")
         boot: $boot
         free: $free
@@ -139,15 +156,15 @@ def boot-snapshot [boot: int]: nothing -> any {
 
 # The per-family RSS lookup of one snapshot — 0 when the family is absent
 # (killed by the previous clean, or born after it).
-def fam-rss [snap: record, family: string]: nothing -> int {
-    let hit: list<record> = ($snap.procs | where {|p| $p.family == $family })
+def fam-rss [snap: Snapshot, family: string]: nothing -> int {
+    let hit: list<FamilySum> = ($snap.procs | where {|p| $p.family == $family })
     if ($hit | is-empty) { 0 } else { $hit | first | get rssMb }
 }
 
 # The leak detector: growth since the last run AND since the boot, per
 # family, flagged at the thresholds. A null snapshot = first run = baseline.
 def leak-report [
-    now: table, prev: any, bootSnap: any,
+    now: list<FamilySum>, prev: any, bootSnap: any,
     leakRunMb: int, leakBootMb: int, swapUsedMb: int,
 ]: nothing -> nothing {
     let prevSwap: int = (if $prev != null { $prev.swapUsedMb? | default 0 } else { $swapUsedMb })
@@ -157,7 +174,7 @@ def leak-report [
         emit $"swap used now: ($swapUsedMb) MB"
         return
     }
-    let rows: list<record> = ($now
+    let rows: list<LeakRow> = ($now
         | each {|f|
             let before: int = (if $prev != null { fam-rss $prev $f.family } else { 0 })
             let atBoot: int = (if $bootSnap != null { fam-rss $bootSnap $f.family } else { 0 })
@@ -181,11 +198,11 @@ def leak-report [
 
 # My ancestor chain + ALL its descendants (my session's own MCP helpers).
 # Siblings of my ancestors (other Task Islands) are deliberately NOT here.
-def protect-set [ps: table]: nothing -> list<int> {
+def protect-set [ps: list<PsRow>]: nothing -> list<int> {
     mut chain: list<int> = [$nu.pid]
     mut cur: int = $nu.pid
     for _ in 1..15 {
-        let row: list<record> = ($ps | where pid == $cur)
+        let row: list<PsRow> = ($ps | where pid == $cur)
         if ($row | is-empty) { break }
         let parent: int = ($row | get 0.ppid)
         if $parent <= 1 { break }
@@ -204,7 +221,7 @@ def protect-set [ps: table]: nothing -> list<int> {
 }
 
 # zcode-cli candidates: the binary, outside the protect set, idle cpu.
-def islands [ps: table, prot: list<int>]: nothing -> table {
+def islands [ps: list<PsRow>, prot: list<int>]: nothing -> list<CpuRow> {
     ^ps -axo pid=,ppid=,pcpu=,args=
     | lines
     | where {|l| $l =~ '\bzcode-cli\b' }
@@ -225,7 +242,7 @@ def main [
     --leak-boot-mb: int = 150 # family growth since the BOOT that flags a leak
 ]: nothing -> nothing {
     let stamp: string = (date now | format date "%Y-%m-%d %H:%M:%S")
-    let ps: table = (snap)
+    let ps: list<PsRow> = (snap)
     let prot: list<int> = (protect-set $ps)
     let freeBefore: int = (free-pct)
     let swapBefore: string = (swap-line)
@@ -236,7 +253,7 @@ def main [
     # -1. the leak ledger: snapshot now, diff against the last run and the boot.
     let prev: any = (last-snapshot)
     let bootSnap: any = (boot-snapshot $boot)
-    let snap: record = (snapshot-write $boot $freeBefore $swapUsed)
+    let snap: Snapshot = (snapshot-write $boot $freeBefore $swapUsed)
     leak-report (families) $prev $bootSnap $leak_run_mb $leak_boot_mb $swapUsed
 
     # 0. the pattern surface: who holds the memory right now.
@@ -245,7 +262,7 @@ def main [
     emit (rss-snap | sort-by -r rssMb | first 10 | select name pid rssMb cpu | table)
 
     # 1. Task-Island zcode-cli processes.
-    let isles: table = (islands $ps $prot)
+    let isles: list<CpuRow> = (islands $ps $prot)
     emit $"islands: ($isles | length) idle zcode-cli candidates — pids ($isles | get pid | str join ', ')"
     if $clean and (($isles | length) > 0) {
         kill ...($isles | get pid)
@@ -275,7 +292,7 @@ def main [
     }
 
     # 4. idle gradle daemons (an ACTIVE build breathes above the threshold).
-    let gradles: table = (^ps -axo pid=,pcpu=,args=
+    let gradles: list<CpuRow> = (^ps -axo pid=,pcpu=,args=
         | lines
         | where {|l| $l =~ 'GradleDaemon' }
         | each {|l| pid-cpu $l }

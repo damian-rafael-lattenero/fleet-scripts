@@ -10,6 +10,11 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/day.log"
 const BRAIN: string = "/Users/lattenero/Projects/agent-brain/core/build/install/agent-brain/bin/agent-brain"
 const SCRIPTS: string = "/Users/lattenero/Scripts"
 
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name.
+type RepoBrief = record<repo: string, n: int, last: string>
+type MemoryBrief = record<kind: string, learned: string>
+
 $env.config.table.mode = "thin"
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
@@ -32,10 +37,12 @@ def fleet-repos []: nothing -> list<string> {
 def commits-section [hours: int]: nothing -> nothing {
     let since: string = $"($hours) hours ago"
     emit $'== commits — last ($hours)h =='
-    let rows: list<record> = (fleet-repos | each {|repo|
+    let rows: list<RepoBrief> = (fleet-repos | each {|repo|
         let out: record = (do { git -C $repo log --since $since --oneline } | complete)
         if $out.exit_code != 0 { [] } else {
-            let lines: list<string> = ($out.stdout | lines | where {|l| ($l | str trim) != "" })
+            # git colorizes even piped on this machine — ansi strip BEFORE
+            # parsing (the anti-patterns law #18, measured on worktree-sweep).
+            let lines: list<string> = ($out.stdout | ansi strip | lines | where {|l| ($l | str trim) != "" })
             if ($lines | is-empty) { [] } else {
                 {repo: ($repo | path basename), n: ($lines | length), last: ($lines | first | str substring 0..59)}
             }
@@ -60,8 +67,8 @@ def memories-section [hours: int]: nothing -> nothing {
     }
     let all: list<record> = ($out.stdout | from json
         | where {|m| ((try { $m.createdAt | into datetime } catch { null }) | default (0 | into datetime)) > $cutoff })
-    let rows: list<record> = ($all | each {|m| {kind: $m.kind, learned: ($m.content | str substring 0..89)} }
-        # newest first, and a BRIEF — cap the display, count everything.
+    let rows: list<MemoryBrief> = ($all | each {|m| {kind: $m.kind, learned: ($m.content | str substring 0..89)} }
+        # newest first (the CLI's own order), and a BRIEF — cap the display, count everything.
         | first 10)
     if ($rows | is-empty) {
         emit "the brain learned nothing new in the window"
