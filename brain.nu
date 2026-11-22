@@ -54,7 +54,14 @@ def rag-section [q: string, k: int, iterate: bool]: nothing -> nothing {
         emit $"query failed — (fold-stderr $out | str substring 0..119)"
         return
     }
-    let hits: list<record> = ($out.stdout | from json | get hits)
+    let parsed: record = ($out.stdout | from json)
+    let hits: list<record> = ($parsed | get hits)
+    if (not ($parsed.relevant? | default true)) {
+        let topSim: float = ($parsed.topSimilarity? | default 0 | math round --precision 2)
+        emit $"nothing relevant in the corpus — top similarity ($topSim) under the 0.55 floor — measured 22/11: relevant 0.57-0.79, noise 0.43-0.57"
+        emit "try `brain --search` for the memory side, or rephrase with the law's own vocabulary"
+        return
+    }
     if ($hits | is-empty) {
         emit "no hits"
         return
