@@ -17,6 +17,12 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/worktree-sweep.log"
 $env.config.table.mode = "thin"
 const PROTECTED: list<string> = [master main damian develop]
 
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name.
+type SweepRow = record<repo: string, item: string, action: string, why: string>
+type WtEntry = record<path: string, branch: string>
+type VerdictRule = record<action: string, why: string, when: closure>
+
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
@@ -62,7 +68,7 @@ def branch-in-worktrees [repo: string]: nothing -> list<string> {
     | each {|l| $l | str replace 'branch refs/heads/' '' }
 }
 
-def audit [repo: string]: nothing -> list<record> {
+def audit [repo: string]: nothing -> list<SweepRow> {
     let mb: string = (main-branch $repo)
     if $mb == "" { return [{repo: ($repo | path basename), item: "-", action: "skip", why: "no master/main branch"}] }
     let wtOut: record = (do { ^git -C $repo worktree list --porcelain } | complete)
@@ -71,7 +77,7 @@ def audit [repo: string]: nothing -> list<record> {
     let merged: list<string> = (merged-locals $repo $mb)
     # worktrees beyond the main one: candidate when the branch is merged
     # and the tree is clean (git refuses the rest even at --clean time).
-    let wts: list<record> = ($wtOut.stdout
+    let wts: list<WtEntry> = ($wtOut.stdout
         | str trim
         | split row "\n\n"
         | skip 1
@@ -80,14 +86,20 @@ def audit [repo: string]: nothing -> list<record> {
             {path: ($lines | where {|l| $l =~ '^worktree ' } | get 0 | str replace 'worktree ' ''),
              branch: (($lines | where {|l| $l =~ '^branch ' } | get -o 0 | default "") | str replace 'branch refs/heads/' '')}
         })
-    let wtRows: list<record> = ($wts | each {|w|
+    let wtRows: list<SweepRow> = ($wts | each {|w|
         let dirty: bool = (((do { ^git -C $w.path status --porcelain } | complete).stdout | str trim) != "")
-        if $dirty { {repo: ($repo | path basename), item: $"($w.branch) at ($w.path)", action: "KEEP", why: "dirty working tree"} }
-        else if not ($w.branch in $merged) { {repo: ($repo | path basename), item: $"($w.branch) at ($w.path)", action: "KEEP", why: "not merged into ($mb)"} }
-        else { {repo: ($repo | path basename), item: $"($w.branch) at ($w.path)", action: "CLEAN-able", why: "merged + clean"} }
+        # the sweep-verdict classifier as a predicate table (the mode-table
+        # law): dirty convicts first, then not-merged, then the catch-all.
+        let rules: list<VerdictRule> = [
+            {action: "KEEP", why: "dirty working tree", when: {|d: bool| $d}}
+            {action: "KEEP", why: $"not merged into ($mb)", when: {|d: bool| not ($w.branch in $merged)}}
+            {action: "CLEAN-able", why: "merged + clean", when: {|d: bool| true}}
+        ]
+        let hit: VerdictRule = ($rules | where {|r| do $r.when $dirty } | first)
+        {repo: ($repo | path basename), item: $"($w.branch) at ($w.path)", action: $hit.action, why: $hit.why}
     })
     # merged local branches not checked out anywhere and not the main line.
-    let brRows: list<record> = ($merged
+    let brRows: list<SweepRow> = ($merged
         | where {|b| not ($b in $inWts) }
         | each {|b| {repo: ($repo | path basename), item: $b, action: "BRANCH-able", why: $"merged into ($mb), no worktree"} })
     $wtRows ++ $brRows
@@ -98,8 +110,8 @@ def main [--clean, --remote]: nothing -> nothing {
     emit $"== worktree-sweep ($stamp) — clean=($clean) remote=($remote) =="
     let repos: list<string> = (repos)
     emit $"fleet repos: ($repos | length)"
-    let rows: list<record> = ($repos | each {|r| audit $r } | flatten)
-    let cleanable: list<record> = ($rows | where {|r| $r.action =~ 'able' })
+    let rows: list<SweepRow> = ($repos | each {|r| audit $r } | flatten)
+    let cleanable: list<SweepRow> = ($rows | where {|r| $r.action =~ 'able' })
     emit ($rows | where {|r| $r.action != "KEEP" } | table -w 85)
     let keeps: int = ($rows | where action == KEEP | length)
     emit $"keeps — not merged or dirty: ($keeps)"

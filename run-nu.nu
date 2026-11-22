@@ -32,44 +32,51 @@
 
 const BRAIN: path = '/Users/lattenero/Projects/agent-brain/core/build/install/agent-brain/bin/agent-brain'
 
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name.
+type LintFinding = record<line: int, kind: string, severity: string, msg: string, hint: string>
+type CodeLine = record<line: int, text: string>
+type PathHit = record<line: int, path: string>
+type Captured = record<exit_code: int, stdout: string, stderr: string>
+
 # ── lint rules ───────────────────────────────────────────────────────────
 # Every rule sees the source lines and ACCUMULATES its findings; findings
 # never block inspection of later rules (the accumulation law).
 
-def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, severity: string, msg: string, hint: string>> {
+def lint-lines [src: string]: nothing -> list<LintFinding> {
     let lines: list<string> = ($src | lines)
-    let findings: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ([])
+    let findings: list<LintFinding> = ([])
 
     # strip obvious comment lines once (comment $vars are not code)
-    let codeLines: list<record<line: int, text: string>> = ($lines
+    let codeLines: list<CodeLine> = ($lines
         | enumerate
         | each {|row| {line: ($row.index + 1), text: $row.item}}
         | where {|row| not ($row.text | str trim | str starts-with '#')})
 
     # rule: self-truncate — open X ... save -f X truncates before the lazy
     # read finishes (measured 15/11: a whole file was lost this way)
-    let opened: list<record<line: int, path: string>> = ($codeLines
+    let opened: list<PathHit> = ($codeLines
         | each {|row| {line: $row.line, m: ($row.text | parse --regex 'open\s+(?:--raw\s+)?[{(]?([\w./~-]+)')} }
         | where {|r| not ($r.m | is-empty)}
         | each {|r| {line: $r.line, path: ($r.m | first).capture0}})
-    let saved: list<record<line: int, path: string>> = ($codeLines
+    let saved: list<PathHit> = ($codeLines
         | each {|row| {line: $row.line, m: ($row.text | parse --regex 'save\s+(?:-f\s+)?([\w./~-]+)')} }
         | where {|r| not ($r.m | is-empty)}
         | each {|r| {line: $r.line, path: ($r.m | first).capture0}})
-    let truncates: list<record> = ($saved | where {|s| ($opened | where {|o| $o.path == $s.path} | length) > 0})
+    let truncates: list<PathHit> = ($saved | where {|s| ($opened | where {|o| $o.path == $s.path} | length) > 0})
     # post-filters: flags captured as paths (--raw) are not paths; only
     # slash-bearing or tilde-prefixed captures count
-    let opened2: list<record<line: int, path: string>> = ($opened | where {|o| (not ($o.path | str starts-with '-')) and (($o.path | str contains '/') or ($o.path | str starts-with '~'))})
-    let saved2: list<record<line: int, path: string>> = ($saved | where {|o| (not ($o.path | str starts-with '-')) and (($o.path | str contains '/') or ($o.path | str starts-with '~'))})
-    let truncates2: list<record> = ($saved2 | where {|s| ($opened2 | where {|o| $o.path == $s.path} | length) > 0})
-    let f1: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($truncates2 | each {|t|
+    let opened2: list<PathHit> = ($opened | where {|o| (not ($o.path | str starts-with '-')) and (($o.path | str contains '/') or ($o.path | str starts-with '~'))})
+    let saved2: list<PathHit> = ($saved | where {|o| (not ($o.path | str starts-with '-')) and (($o.path | str contains '/') or ($o.path | str starts-with '~'))})
+    let truncates2: list<PathHit> = ($saved2 | where {|s| ($opened2 | where {|o| $o.path == $s.path} | length) > 0})
+    let f1: list<LintFinding> = ($truncates2 | each {|t|
         {line: $t.line, kind: "self-truncate", severity: "ERROR",
          msg: $"save -f overwrites '($t.path)' which this script also opens",
          hint: "save truncates before the lazy open read completes — write to a temp path then move"}})
 
     # rule: midword-$ — a bare token with $ INSIDE (gui/$uid) is literal
     # text; interpolation only happens inside $"..." strings
-    let f2: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
+    let f2: list<LintFinding> = ($codeLines
         | where {|row| not ($row.text | str contains '$"')}
         | each {|row|
             let hits: list<string> = ($row.text | parse --regex '([\w./=-]+\$[a-zA-Z_][\w]*)' | each {|p| $p.capture0})
@@ -88,7 +95,7 @@ def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, se
     # are exempt: a literal tilde in human-readable output is documentation,
     # not a path (measured on the bot deploy scripts; audit 17/11 noted the
     # exemption missed mid-line prints — contains, not starts-with).
-    let f3: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
+    let f3: list<LintFinding> = ($codeLines
         | where {|row| ($row.text | parse --regex "'([^']*~[^']*)'" | length) > 0}
         | where {|row| not ($row.text | str trim | str contains 'print')}
         | each {|row|
@@ -97,7 +104,7 @@ def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, se
              hint: "expand first (path expand / $env.HOME join) or drop the quotes"}})
 
     # rule: blind-sleep — sleeps >= 10sec violate the reactive law
-    let f4: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
+    let f4: list<LintFinding> = ($codeLines
         | each {|row|
             {line: $row.line, secs: ($row.text | parse --regex 'sleep\s+([\d.]+)\s*sec' | each {|p| $p.capture0 | into float})}
         }
@@ -112,7 +119,7 @@ def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, se
     # lazy open read completes (measured data loss 15/11); the $var variant
     # ducked under the literal-only self-truncate rule (audit 17/11: the
     # "gate-invisible variant").
-    let f5: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
+    let f5: list<LintFinding> = ($codeLines
         | each {|row|
             let opens: list<string> = ($row.text | parse --regex 'open\s+(?:--raw\s+)?(\$?[\w./~-]+)' | each {|p| $p.capture0 })
             let saves: list<string> = ($row.text | parse --regex 'save\s+(?:--raw\s+)?(?:-f\s+)?(\$?[\w./~-]+)' | each {|p| $p.capture0 })
@@ -130,7 +137,7 @@ def lint-lines [src: string]: nothing -> list<record<line: int, kind: string, se
     # rule: path-type-bug — `path type` compared against an empty string: it
     # returns null or a type name, never "" (on 0.117 the comparison is a
     # type-mismatch error — measured on the bot's retire-python).
-    let f6: list<record<line: int, kind: string, severity: string, msg: string, hint: string>> = ($codeLines
+    let f6: list<LintFinding> = ($codeLines
         | where {|row| ($row.text | parse --regex 'path type\) != ""' | length) > 0}
         | each {|row|
             {line: $row.line, kind: "path-type-bug", severity: "WARN",
@@ -154,7 +161,7 @@ def brain-suggest [sig: string]: nothing -> list<string> {
     let id: int = (job spawn --description 'run-nu brain suggest' {
         ^$BRAIN query $"nushell: ($sig)" --k 2 | complete | job send 0 --tag $tag
     })
-    let r: record = (try { job recv --tag $tag --timeout 4sec } catch {
+    let r: Captured = (try { job recv --tag $tag --timeout 4sec } catch {
         job kill $id
         {exit_code: 124, stdout: '', stderr: 'deadline exceeded'}
     })
@@ -172,11 +179,13 @@ def headline [text: string]: nothing -> string {
     let ls: list<string> = ($text | lines)
     let marked: list<string> = ($ls | where {|l| ($l | str trim | str starts-with 'x ')})
     if not ($marked | is-empty) {
-        $marked | first | str trim | str replace --regex '^x ' ''
-    } else {
-        let errLines: list<string> = ($ls | where {|l| ($l | str trim | str starts-with 'Error')})
-        if not ($errLines | is-empty) { $errLines | first | str trim } else { '' }
+        return ($marked | first | str trim | str replace --regex '^x ' '')
     }
+    let errLines: list<string> = ($ls | where {|l| ($l | str trim | str starts-with 'Error')})
+    if not ($errLines | is-empty) {
+        return ($errLines | first | str trim)
+    }
+    ''
 }
 
 # ── main ─────────────────────────────────────────────────────────────────
@@ -186,7 +195,7 @@ def main [
     --json                       # machine-readable report on stdout (for agents)
     --no-run                     # gate only: parse + lint + suggest, never execute
     --keep                       # always keep the temp script (default: keep only on failure)
-]: nothing -> any {
+]: nothing -> nothing {
     let src: string = (if $file != null {
         if not ($file | path exists) { error make {msg: $"run-nu: file not found: ($file)"} }
         open --raw $file
@@ -206,7 +215,7 @@ def main [
     let parses: bool = (nu-check $gateFile)
 
     # layer 2: lint (always runs, accumulates everything)
-    let lint: list<record> = (lint-lines $src)
+    let lint: list<LintFinding> = (lint-lines $src)
     let errors: list<record> = ($lint | where severity == ERROR)
     let warns: list<record> = ($lint | where severity == WARN)
     let blocked: bool = (not $parses) or (not ($errors | is-empty))
@@ -214,7 +223,7 @@ def main [
     # layer 4 (pre-run): suggestions for gate findings — the PARSE case
     # queries the brain with the REAL error headline (re-running a
     # parse-broken script executes nothing, it only shows the caret)
-    let caret: record<exit_code: int, stdout: string, stderr: string> = (if not $parses {
+    let caret: Captured = (if not $parses {
         do { nu $script } | complete
     } else {
         {exit_code: 0, stdout: '', stderr: ''}
@@ -226,9 +235,9 @@ def main [
 
     # layer 3: run unless blocked / --no-run
     let ran: bool = (not $blocked) and (not $no_run)
-    let run: record<exit_code: int, stdout: string, stderr: string> = (if $ran {
+    let run: Captured = (if $ran {
         let t0: datetime = (date now)
-        let out: record<exit_code: int, stdout: string, stderr: string> = (do { nu $script } | complete)
+        let out: Captured = (do { nu $script } | complete)
         $out | insert duration ((date now) - $t0)
     } else {
         {exit_code: -1, stdout: '', stderr: ''}

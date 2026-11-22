@@ -25,6 +25,8 @@ const GITLEAKS: string = "/opt/homebrew/bin/gitleaks"
 const TRUFFLEHOG: string = "/opt/homebrew/bin/trufflehog"
 const CONFIG: string = "/Users/lattenero/.config/gitleaks/gitleaks.toml"
 
+use /Users/lattenero/Projects/nushell-fp/mods/proc.nu *
+
 def die [msg: string]: nothing -> nothing {
     print -e $"✗ ($msg)"
     exit 1
@@ -43,7 +45,7 @@ def scan-one [abs: string]: nothing -> record {
 def scan-staged [dir: string]: nothing -> nothing {
     let files: list<string> = (staged-files $dir)
     if ($files | is-empty) {
-        print $"✓ sin archivos staged que escanear: ($dir)"
+        print $"✓ no staged files to scan: ($dir)"
         return
     }
     mut bad: list<string> = []
@@ -60,9 +62,9 @@ def scan-staged [dir: string]: nothing -> nothing {
         }
     }
     if ($bad | is-not-empty) {
-        die $"staged: hallazgos en ($bad | str join ', ') — valores redactados arriba"
+        die $"staged: findings in ($bad | str join ', ') — values redacted above"
     }
-    print $"✓ sin secretos en ($files | length) archivos staged: ($dir)"
+    print $"✓ no secrets in ($files | length) staged files: ($dir)"
 }
 
 # THE HISTORY DEFAULT: trufflehog's own walker, VERIFIED findings only — the
@@ -70,27 +72,27 @@ def scan-staged [dir: string]: nothing -> nothing {
 # does). No --only-verified flag exists in this build: the JSON's Verified
 # field is the filter, applied here.
 def scan-history [dir: string]: nothing -> nothing {
-    if not ($TRUFFLEHOG | path exists) { die "trufflehog no está instalado — brew install trufflehog" }
+    if not ($TRUFFLEHOG | path exists) { die "trufflehog is not installed — brew install trufflehog" }
     let r: record = (^$TRUFFLEHOG git $"file://($dir)" --json --no-update | complete)
     if $r.exit_code != 0 {
-        die $"trufflehog exit ($r.exit_code): ($r.stderr | str trim | str substring 0..300)"
+        die $"trufflehog exit ($r.exit_code): (fold-stderr $r | str trim | str substring 0..300)"
     }
     let rows: list<any> = ($r.stdout | lines | where {|l| ($l | str trim | is-not-empty) }
         | each {|l| try { $l | from json } catch { null } } | where {|o| $o != null })
     let verified: list<any> = ($rows | where {|o| ($o.Verified? | default false) == true })
     if ($verified | is-empty) {
         let tail: string = (if ($rows | is-empty) {
-            "sin señales"
+            "no signals"
         } else {
-            $"($rows | length) señales sin verificar — fixtures o DSN local, no accionables"
+            $"($rows | length) unverified signals — fixtures or a local DSN, not actionable"
         })
-        print $"✓ historia sin credenciales VIVAS: ($dir) — ($tail)"
+        print $"✓ history holds no LIVE credentials: ($dir) — ($tail)"
         return
     }
     for o in $verified {
-        print -e $"· ($o.DetectorName) VIVO en ($o.SourceMetadata.Data.Git.file):($o.SourceMetadata.Data.Git.line)"
+        print -e $"· ($o.DetectorName) LIVE in ($o.SourceMetadata.Data.Git.file):($o.SourceMetadata.Data.Git.line)"
     }
-    die $"history: ($verified | length) credencial VIVA en la historia de ($dir) — INCIDENTE"
+    die $"history: ($verified | length) LIVE credential(s) in the history of ($dir) — INCIDENT"
 }
 
 def deep-allowed [f: string]: nothing -> bool {
@@ -134,18 +136,18 @@ def scan-history-deep [dir: string]: nothing -> nothing {
         if $r.exit_code != 0 {
             let found: list<any> = (try { $r.stdout | from json } catch { [] })
             $hits = ($hits + ($found | length))
-            print $"  ($h | str substring 0..7): ($found | length) hallazgos en archivos no-test"
+            print $"  ($h | str substring 0..7): ($found | length) findings in non-test files"
         }
     }
-    if $hits > 0 { die $"history-deep: ($hits) hallazgo(s) en ($dir)" }
-    print $"✓ historia profunda limpia (fuera de tests/vendor): ($dir)"
+    if $hits > 0 { die $"history-deep: ($hits) finding(s) in ($dir)" }
+    print $"✓ deep history clean (outside tests/vendor): ($dir)"
 }
 
 def main [repo: path, --staged, --history, --deep]: nothing -> nothing {
-    if not ($GITLEAKS | path exists) { die "gitleaks no está instalado — brew install gitleaks" }
-    if not ($CONFIG | path exists) { die $"falta la config: ($CONFIG)" }
+    if not ($GITLEAKS | path exists) { die "gitleaks is not installed — brew install gitleaks" }
+    if not ($CONFIG | path exists) { die $"missing the config: ($CONFIG)" }
     let dir: string = ($repo | path expand)
-    if (($dir | path type) != "dir") { die $"no es un directorio: ($dir)" }
+    if (($dir | path type) != "dir") { die $"not a directory: ($dir)" }
     if $staged {
         scan-staged $dir
         return
@@ -160,12 +162,12 @@ def main [repo: path, --staged, --history, --deep]: nothing -> nothing {
     }
     let r: record = (scan-one $dir)
     if $r.exit_code == 0 {
-        print $"✓ sin secretos en el working tree: ($dir)"
+        print $"✓ no secrets in the working tree: ($dir)"
         return
     }
     let findings: list<any> = (try { $r.stdout | from json } catch { [] })
     for f in $findings {
         print -e $"· ($f.RuleID) en ($f.File):($f.StartLine)"
     }
-    die $"tree: ($findings | length) hallazgos en ($dir) — valores redactados"
+    die $"tree: ($findings | length) findings in ($dir) — values redacted"
 }
