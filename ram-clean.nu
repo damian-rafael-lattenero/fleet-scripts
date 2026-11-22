@@ -5,7 +5,9 @@
 # --clean executes, one decision per line, stdout AND the run log:
 #   0. the top-10 memory citizens — the pattern surface, shown every run
 #   1. idle Task-Island zcode-cli processes — cpu < 1%, never my own
-#      ancestry and never my session's own helper descendants
+#      ancestry, never my session's own helper descendants, and never an
+#      island whose subtree still breathes (a parked session of ANOTHER
+#      window waiting on a live build is itself idle while its child works)
 #   2. ollama pattern: the brain's embedder (nomic-embed) STAYS, every
 #      other loaded model is stopped (stop != delete; they reload on demand)
 #   3. AppleSpell killed (macOS growth bug; respawns small on demand)
@@ -36,6 +38,13 @@ const IDLE_CPU: float = 1.0
 # (measured 22/11), `nothing` is the null arm that works.
 type PsRow = record<pid: int, ppid: int, cpu: float, name: string>
 type CpuRow = record<pid: int, cpu: float>
+# An args-bearing process row — the feed the island scan matches candidates
+# on and walks descendants over (one ps feed for both jobs).
+type ArgsRow = record<pid: int, ppid: int, cpu: float, args: string>
+# The island scan's verdict: killable islands (whole subtree idle), and
+# the ones HELD BACK because a descendant breathes — the breather named,
+# the why as a receipt.
+type IslandScan = record<killable: list<CpuRow>, held: list<record<pid: int, breatherPid: int, breatherCpu: float>>>
 type RssRow = record<rssMb: int, pid: int, cpu: float, name: string>
 type FamilyRule = record<pattern: string, family: oneof<string, nothing>>
 type FamilySum = record<family: string, rssMb: int, n: int>
@@ -73,6 +82,17 @@ def pid-cpu [line: string]: nothing -> CpuRow {
     let t: string = ($line | str trim)
     let parts: list<string> = ($t | split row -r '\s+')
     {pid: ($parts | get 0 | into int), cpu: ($parts | get 1 | into float)}
+}
+
+# An args-bearing ps line (pid ppid cpu + the full command) as one row.
+def args-row [line: string]: nothing -> ArgsRow {
+    let parts: list<string> = (($line | str trim) | split row -r '\s+')
+    {
+        pid: ($parts | get 0 | into int)
+        ppid: ($parts | get 1 | into int)
+        cpu: ($parts | get 2 | into float)
+        args: ($parts | skip 3 | str join ' ')
+    }
 }
 
 # The full ps snapshot as records (the builtin ps lacks pcpu and comm).
@@ -240,13 +260,51 @@ def protect-set [ps: list<PsRow>]: nothing -> list<int> {
     $prot
 }
 
-# zcode-cli candidates: the binary, outside the protect set, idle cpu.
-def islands [prot: list<int>]: nothing -> list<CpuRow> {
-    ^ps -axo pid=,ppid=,pcpu=,args=
-    | lines
-    | where {|l| $l =~ '\bzcode-cli\b' }
-    | each {|l| pid-cpu $l }
-    | where {|r| (not ($r.pid in $prot)) and ($r.cpu < $IDLE_CPU) }
+# The descendants of one pid — the same fixpoint expansion protect-set
+# runs over MY subtree, pointed at a CANDIDATE: everything below it.
+def descendants [rows: list<ArgsRow>, root: int]: nothing -> list<int> {
+    mut sub: list<int> = [$root]
+    for _ in 1..6 {
+        let base: list<int> = $sub
+        let kids: list<int> = ($rows | where ppid in $base | get pid)
+        let fresh: list<int> = ($kids | where {|k| not ($k in $base) })
+        if ($fresh | is-empty) { break }
+        $sub = ($sub | append $fresh)
+    }
+    $sub
+}
+
+# The PURE core of the island scan: given the process rows and the protect
+# set, split the idle zcode-cli islands into killable and held. An idle
+# island of ANOTHER session parked on a live build is itself idle while
+# its gradle child breathes — killing the parent would orphan that turn.
+# An island dies only when nothing below it breathes either.
+def island-partition [rows: list<ArgsRow>, prot: list<int>]: nothing -> IslandScan {
+    let idle: list<ArgsRow> = ($rows
+        | where {|r| ($r.args =~ '\bzcode-cli\b') and (not ($r.pid in $prot)) and ($r.cpu < $IDLE_CPU) })
+    let held: list<record<pid: int, breatherPid: int, breatherCpu: float>> = ($idle
+        | each {|c|
+            let sub: list<int> = (descendants $rows $c.pid)
+            let hot: list<ArgsRow> = ($rows
+                | where {|r| ($r.pid in $sub) and ($r.pid != $c.pid) and ($r.cpu >= $IDLE_CPU) }
+                | sort-by -r cpu)
+            if ($hot | is-empty) { null } else { {pid: $c.pid, breatherPid: ($hot | get 0.pid), breatherCpu: ($hot | get 0.cpu)} }
+        }
+        | compact)
+    let heldPids: list<int> = ($held | get pid)
+    {
+        killable: ($idle | where {|c| not ($c.pid in $heldPids) } | each {|c| {pid: $c.pid, cpu: $c.cpu} })
+        held: $held
+    }
+}
+
+# The impure edge of the island scan: one ps feed with args, parsed once.
+def islands [prot: list<int>]: nothing -> IslandScan {
+    let rows: list<ArgsRow> = (^ps -axo pid=,ppid=,pcpu=,args=
+        | lines
+        | where {|l| ($l | str trim) != "" }
+        | each {|l| args-row $l })
+    island-partition $rows $prot
 }
 
 # "total = 4096.00M used = 2434.00M free = ..." → the used MB as int.
@@ -284,12 +342,16 @@ def main [
     emit "== top 10 memory citizens (MB) =="
     emit (rss-snap | sort-by -r rssMb | first 10 | select name pid rssMb cpu | table)
 
-    # 1. Task-Island zcode-cli processes.
-    let isles: list<CpuRow> = (islands $prot)
-    emit $"islands: ($isles | length) idle zcode-cli candidates — pids ($isles | get pid | str join ', ')"
-    if $clean and (($isles | length) > 0) {
-        kill ...($isles | get pid)
-        emit $"killed islands: ($isles | get pid | str join ', ')"
+    # 1. Task-Island zcode-cli processes — descendant-aware: an island dies
+    #    only when nothing below it breathes either.
+    let scan: IslandScan = (islands $prot)
+    emit $"islands: ($scan.killable | length) idle zcode-cli candidates — pids ($scan.killable | get pid | str join ', ')"
+    for h in $scan.held {
+        emit $"island held: ($h.pid) — descendant ($h.breatherPid) breathes at ($h.breatherCpu)% — not killed"
+    }
+    if $clean and (($scan.killable | length) > 0) {
+        kill ...($scan.killable | get pid)
+        emit $"killed islands: ($scan.killable | get pid | str join ', ')"
     }
 
     # 2. ollama pattern: the brain's embedder stays, the rest reload on demand.
