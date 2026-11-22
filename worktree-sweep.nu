@@ -8,9 +8,20 @@
 # names: the origin/ prefix form fails — measured 15/11).
 # Every decision is emitted; the run appends to
 # ~/Library/Logs/worktree-sweep.log. Scope: direct ~/Projects/* repos
-# (the nested notes repos are intentionally out of this sweep).
+# (the nested notes repos are intentionally out of this sweep), PLUS the
+# orphan-fixture section: test-sown git CLONES in ~/Projects/.worktrees
+# (their .git is a DIRECTORY — a real worktree carries a .git FILE — with
+# no origin; nothing registers them, so the repo audit is blind by
+# design). --clean removes only those older than ORPHAN_MIN_AGE — a fresh
+# fixture may belong to a live test run.
 
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/worktree-sweep.log"
+# The agent worktree folder — where the orphan-fixture section hunts the
+# test-sown git clones the repo audit can never see.
+const WT_DIR: string = "/Users/lattenero/Projects/.worktrees"
+# An orphan clone younger than this stays: a fixture seconds-to-minutes
+# old may belong to a test run STILL alive; anything older is leftover.
+const ORPHAN_MIN_AGE: duration = 1hr
 
 # Nested script nu does NOT load config.nu — the owner's thin theme rides
 # the script itself (measured 21/11).
@@ -108,12 +119,64 @@ def audit [repo: string]: nothing -> list<SweepRow> {
     $wtRows ++ $brRows
 }
 
+# Orphan fixtures in the agent worktree folder: test-sown git CLONES — the
+# .git inside is a DIRECTORY (a real worktree carries a .git FILE pointing
+# at its owning repo) and no origin claims them. Nothing registers them in
+# any repo's worktree list, so the audit above is blind to them by design.
+# Verdict as a predicate table (the mode-table law): real-worktree first,
+# then origin-owned clone, then the age gate over the fixture class.
+def orphan-audit []: nothing -> list<SweepRow> {
+    if not ($WT_DIR | path exists) { return [] }
+    ls $WT_DIR
+    | where type == dir
+    | each {|d|
+        let dotgit: string = ($d.name + "/.git")
+        let isClone: bool = (($dotgit | path exists) and (($dotgit | path type) == "dir"))
+        let originLive: bool = ((do { ^git -C $d.name remote get-url origin } | complete).exit_code == 0)
+        let ageH: int = (((date now) - $d.modified) / 1hr | math floor)
+        let rules: list<VerdictRule> = [
+            {action: "KEEP", why: "real worktree — the repo audit owns it", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| not $c.isClone }}
+            {action: "KEEP", why: "clone with origin — someone's real checkout", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| $c.originLive }}
+            {action: "ORPHAN-able", why: "clone fixture, no origin — past the age gate", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| $c.ageH >= ($ORPHAN_MIN_AGE / 1hr) }}
+            {action: "KEEP", why: "clone fixture fresh — below the age gate, a live test may own it", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| true }}
+        ]
+        let hit: VerdictRule = ($rules | where {|r| do $r.when {isClone: $isClone, originLive: $originLive, ageH: $ageH} } | first)
+        {repo: "orphan", item: $d.name, action: $hit.action, why: $"($hit.why) — age ($ageH)h"}
+    }
+}
+
+# One executor per action kind — the mode-table law again: rows pick the
+# branch, only the winner runs (no else-if chain). The ORPHAN row carries
+# the full path in item; the gate already vetted its age at audit time.
+def sweep-exec [r: SweepRow, remote: bool]: nothing -> nothing {
+    let branches: list<record<when: closure, run: closure>> = [
+        {when: {|rr: SweepRow| $rr.action =~ 'ORPHAN'}
+         run: {|| rm -rf $r.item; emit $"orphan fixture removed: ($r.item)" }}
+        {when: {|rr: SweepRow| $rr.action =~ 'CLEAN'}
+         run: {|| let path: string = ($r.item | split row " at " | get 1)
+                 let wrem: record = (do { ^git worktree remove $path } | complete)
+                 emit $"worktree remove ($path): exit ($wrem.exit_code)"
+                 let br: string = ($r.item | split row " at " | get 0)
+                 let bd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) branch -d $br } | complete)
+                 emit $"branch -d ($br): exit ($bd.exit_code)" }}
+        {when: {|rr: SweepRow| true}
+         run: {|| let bd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) branch -d $r.item } | complete)
+                 emit $"branch -d ($r.item): exit ($bd.exit_code)"
+                 if $remote {
+                     let name: string = ($r.item | str replace "origin/" "")
+                     let pd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) push origin --delete $name } | complete)
+                     emit $"push origin --delete ($name): exit ($pd.exit_code)"
+                 } }}
+    ]
+    ($branches | where {|row| do $row.when $r } | first | get run | do $in)
+}
+
 def main [--clean, --remote]: nothing -> nothing {
     let stamp: string = (date now | format date "%Y-%m-%d %H:%M:%S")
     emit $"== worktree-sweep ($stamp) — clean=($clean) remote=($remote) =="
     let repos: list<string> = (repos)
     emit $"fleet repos: ($repos | length)"
-    let rows: list<SweepRow> = ($repos | each {|r| audit $r } | flatten)
+    let rows: list<SweepRow> = (($repos | each {|r| audit $r } | flatten) ++ (orphan-audit))
     let cleanable: list<SweepRow> = ($rows | where {|r| $r.action =~ 'able' })
     emit ($rows | where {|r| $r.action != "KEEP" } | table -w 85)
     let keeps: int = ($rows | where action == KEEP | length)
@@ -126,25 +189,8 @@ def main [--clean, --remote]: nothing -> nothing {
         emit $"($cleanable | length) candidates — re-run with --clean to execute"
         exit 0
     }
-    let uid: string = (^id -u | str trim)
     for r in $cleanable {
-        if ($r.action =~ 'CLEAN') {
-            let path: string = ($r.item | split row " at " | get 1)
-            let wrem: record = (do { ^git worktree remove $path } | complete)
-            emit $"worktree remove ($path): exit ($wrem.exit_code)"
-            let br: string = ($r.item | split row " at " | get 0)
-            let bd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) branch -d $br } | complete)
-            emit $"branch -d ($br): exit ($bd.exit_code)"
-        } else {
-            let br: string = $r.item
-            let bd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) branch -d $br } | complete)
-            emit $"branch -d ($br): exit ($bd.exit_code)"
-            if $remote {
-                let name: string = ($br | str replace "origin/" "")
-                let pd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) push origin --delete $name } | complete)
-                emit $"push origin --delete ($name): exit ($pd.exit_code)"
-            }
-        }
+        sweep-exec $r $remote
     }
     emit "sweep complete"
 }
