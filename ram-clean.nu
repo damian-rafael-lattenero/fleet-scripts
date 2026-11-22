@@ -17,6 +17,9 @@
 #      receipts — only its crash reporter is auto-killed; replacing the
 #      daemon is the owner's decision (measured ~1.0 GB across processes)
 # Every run appends to ~/Library/Logs/ram-clean.log.
+# --trend is a READ-ONLY mode: the ledger's history as a time series (per
+# family first→last, Δ, and upRuns — how many runs it only went UP), no
+# snapshot written, exits before any plan or clean work.
 
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/ram-clean.log"
 # The leak ledger: one JSONL snapshot per run (families + free + swap), so
@@ -49,6 +52,10 @@ type RssRow = record<rssMb: int, pid: int, cpu: float, name: string>
 type FamilyRule = record<pattern: string, family: oneof<string, nothing>>
 type FamilySum = record<family: string, rssMb: int, n: int>
 type LeakRow = record<family: string, nowMb: int, runDelta: int, bootDelta: int>
+# One family's trajectory across the trend window: first/last/Δ in the
+# window, plus the persistence count — how many consecutive-step runs it
+# only went UP (climbers sit near the run count, noise hovers half).
+type TrendRow = record<family: string, firstMb: int, lastMb: int, deltaMb: int, upRuns: int, seenRuns: int>
 type Snapshot = record<stamp: string, boot: int, free: int, swapUsedMb: int, procs: list<FamilySum>>
 # A prior-run lookup from the ledger as the nushell-fp Option shape (union
 # aliases don't parse, measured — the kind lives in the tag row):
@@ -198,6 +205,28 @@ def fam-rss [snap: Snapshot, family: string]: nothing -> int {
     if ($hit | is-empty) { 0 } else { $hit | first | get rssMb }
 }
 
+# The trend window as family trajectories (the pure core of --trend): the
+# series of rssMb across the window's snapshots, absent-from-a-snapshot
+# reads 0 (the fam-rss convention), sorted by Δ — the climbers first, the
+# big fallers (a clean that worked) visible at the bottom.
+def trend-rows [snaps: list<Snapshot>]: nothing -> list<TrendRow> {
+    let fams: list<string> = ($snaps | get procs | flatten | get family | uniq)
+    $fams
+    | each {|f|
+        let series: list<int> = ($snaps | each {|s| fam-rss $s $f })
+        {
+            family: $f
+            firstMb: ($series | first)
+            lastMb: ($series | last)
+            deltaMb: (($series | last) - ($series | first))
+            upRuns: ($series | window 2 | where {|w| ($w | get 1) > ($w | get 0) } | length)
+            seenRuns: ($series | where {|v| $v > 0 } | length)
+        }
+    }
+    | sort-by -r deltaMb
+    | first 12
+}
+
 # The leak detector: growth since the last run AND since the boot, per
 # family, flagged at the thresholds. The baselines arrive as Prior Options
 # and eliminate ONCE at the top — below the guard every value is a
@@ -316,6 +345,8 @@ def swap-used-mb []: nothing -> int {
 
 def main [
     --clean
+    --trend                  # read-only: the ledger's history as a trend view, then exit
+    --trend-runs: int = 10   # snapshots in the trend window
     --leak-run-mb: int = 30   # family growth since the LAST run that flags a leak
     --leak-boot-mb: int = 150 # family growth since the BOOT that flags a leak
 ]: nothing -> nothing {
@@ -326,7 +357,24 @@ def main [
     let swapBefore: string = (swap-line)
     let boot: int = (^sysctl -n kern.boottime | parse -r 'sec = (?<sec>\d+)' | get 0.sec | into int)
     let swapUsed: int = (swap-used-mb)
-    emit $"== ram-clean ($stamp) — clean=($clean) =="
+    emit $"== ram-clean ($stamp) — clean=($clean) trend=($trend) =="
+
+    # -2. --trend: the ledger's history as a time series — READ-ONLY, no
+    #     snapshot written, exits before any plan or clean work.
+    if $trend {
+        let snaps: list<Snapshot> = (ledger-rows | last $trend_runs)
+        if ($snaps | length) < 2 {
+            emit "trend: not enough ledger rows yet — run ram-clean a few times first"
+            return
+        }
+        let firstS: Snapshot = ($snaps | first)
+        let lastS: Snapshot = ($snaps | last)
+        emit $"== trend — last ($snaps | length) runs · ($firstS.stamp) → ($lastS.stamp) =="
+        emit $"free: ($firstS.free)% → ($lastS.free)% · swap: ($firstS.swapUsedMb) → ($lastS.swapUsedMb) MB — Δ ($lastS.swapUsedMb - $firstS.swapUsedMb) MB"
+        emit (trend-rows $snaps | table)
+        emit "upRuns = runs where the family grew vs the previous snapshot — climbers sit near the run count, noise hovers around half"
+        return
+    }
 
     # -1. the leak ledger: read ONCE, write ONCE (pruned), diff the SAME
     #     family feed — one ps truth for the snapshot and the leak report.
