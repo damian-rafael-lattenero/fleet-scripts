@@ -27,12 +27,18 @@ const BREW: string = "/opt/homebrew/bin/brew"
 const FORK_ROOT: string = "/Users/lattenero/Projects/ZCode"
 const BOT_ROOT: string = "/Users/lattenero/Projects/zcode-bot-kotlin"
 
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name.
+type ToolVersion = record<tool: string, version: string>
+
 # One external's version line (complete captures the streams — KB
-# stdout_stderr_exit_codes.md; --version works for java since JDK 9 too)
+# stdout_stderr_exit_codes.md; --version works for java since JDK 9 too).
+# `get -o 0` over `first`: an empty version output must land on the default,
+# never kill the panel (first-on-empty raises before default can act).
 def version-of [name: string]: nothing -> string {
     let out: record = do -i { ^$name --version } | complete
     let text: string = if ($out.stdout | str trim) == "" { $out.stderr } else { $out.stdout }
-    $text | lines | first | default "(missing)"
+    $text | lines | get -o 0 | default "(missing)"
 }
 
 # The PINS — read-only from the repos; these move ONLY with a tested
@@ -51,7 +57,7 @@ def pins []: nothing -> table<tool: string, pin: string> {
 
 # The panel: floating tools' live versions next to the pins — read-only
 def panel []: nothing -> nothing {
-    let live: list<record<tool: string, version: string>> = [
+    let live: list<ToolVersion> = [
         {tool: "nu-nightly", version: (version-of "nu-nightly")}
         {tool: "node", version: (version-of "node")}
         {tool: "pnpm", version: (version-of "pnpm")}
@@ -68,13 +74,19 @@ def main [
     --report-only  # versions panel only — touch nothing
 ]: nothing -> nothing {
     if not $report_only {
+        # nu does NOT raise on an external's non-zero exit (only on
+        # command-not-found) — the old try/catch here was nearly dead code.
+        # `complete` is the honest gate: the exit code speaks, the panel
+        # still runs after either failure.
         print $"🔄 (ansi cyan)brew update(ansi reset) — refreshing the index"
-        try { ^$BREW update } catch { |err|
-            print $"❌ brew update failed (exit ($err.exit_code)) — the panel still runs"
+        let upd: record = (do { ^$BREW update } | complete)
+        if $upd.exit_code != 0 {
+            print $"❌ brew update failed (exit ($upd.exit_code)) — the panel still runs"
         }
-        print $"🔄 (ansi cyan)brew upgrade(ansi reset) — upgrading the floating surface (this is the slow step)"
-        try { ^$BREW upgrade } catch { |err|
-            print $"❌ brew upgrade failed (exit ($err.exit_code)) — some tools may be stale"
+        print $"🔄 (ansi cyan)brew upgrade(ansi reset) — upgrading the floating surface, this is the slow step"
+        let upg: record = (do { ^$BREW upgrade } | complete)
+        if $upg.exit_code != 0 {
+            print $"❌ brew upgrade failed (exit ($upg.exit_code)) — some tools may be stale"
         }
     }
     panel

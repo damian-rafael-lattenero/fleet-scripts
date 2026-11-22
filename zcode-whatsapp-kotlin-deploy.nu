@@ -1,25 +1,25 @@
 #!/Users/lattenero/.local/bin/nu-nightly
-# zcode-whatsapp-kotlin-deploy.nu — SOLO el bot Kotlin de WhatsApp
-# (whatsdigest): build de Gradle (+ detekt + tests) → install → relanza el
-# LaunchAgent → verificación propia. NUNCA toca el fork ni el bot Kotlin
-# espejo de ZCode.
+# zcode-whatsapp-kotlin-deploy.nu — the WhatsApp bot ONLY (whatsdigest):
+# gradle build (+ detekt + tests) → install → LaunchAgent relaunch → its own
+# check. It NEVER touches the fork or the ZCode mirror bot.
 #
-# El script canónico vive en el repo (scripts/deploy-daemon.nu); esto SOLO lo
-# invoca. El bot de los grupos saluda al boot y el script verifica el heartbeat.
+# The canonical script lives in the repo (scripts/deploy-daemon.nu); this
+# wrapper ONLY invokes it. The groups bot greets on boot and the script
+# verifies the heartbeat.
 #
-# Ley de oro: UN deploy por cambio. Si cambian el fork y/o el bot también,
-# zcode-deploy-all lleva los tres.
+# Golden rule: ONE deploy per change. If the fork and/or the mirror bot
+# changed too, zcode-deploy-all carries them together.
 
 const NU: string = "/Users/lattenero/.local/bin/nu-nightly"
 const WHATSAPP_SCRIPT: string = "/Users/lattenero/Projects/whatsdigest-kt/scripts/deploy-daemon.nu"
 
 def main []: nothing -> nothing {
-    print $"🚀 (ansi cyan)Bot Kotlin WhatsApp: deploy-daemon(ansi reset) \(build + install + LaunchAgent + verificación\)"
+    print $"🚀 (ansi cyan)WhatsApp bot: deploy-daemon(ansi reset) \(build + install + LaunchAgent + check\)"
     try {
         run-external $NU $WHATSAPP_SCRIPT
-        print "✅ Bot Kotlin WhatsApp deployado — el bot de los grupos saluda al boot; log: ~/.zcode/bot-kotlin/logs/deploy-whatsapp.log"
+        print "✅ WhatsApp bot deployed — the groups bot greets on boot; log: ~/.zcode/bot-kotlin/logs/deploy-whatsapp.log"
     } catch { |err|
-        print $"❌ deploy del Bot Kotlin de WhatsApp falló: ($err.msg)"
+        print $"❌ WhatsApp bot deploy failed: ($err.msg)"
         exit 1
     }
 }

@@ -11,12 +11,12 @@ const NU: string = "/opt/homebrew/bin/nu"
 const BRAIN_SCRIPT: string = "/Users/lattenero/Projects/agent-brain/scripts/deploy-brain.nu"
 
 def main []: nothing -> nothing {
-    print $"🚀 (ansi cyan)Agent-brain: deploy-brain(ansi reset) \(build + restart + verificación /ready\)"
+    print $"🚀 (ansi cyan)Agent-brain: deploy-brain(ansi reset) \(build + restart + /ready check\)"
     try {
         run-external $NU $BRAIN_SCRIPT
-        print "✅ Agent-brain deployado — /ready 200; verificá con health-check (8 capas) si querés el veredicto completo"
+        print "✅ agent-brain deployed — /ready 200; run health-check (8 layers) for the full verdict"
     } catch { |err|
-        print $"❌ deploy del agent-brain falló: ($err.msg)"
+        print $"❌ agent-brain deploy failed: ($err.msg)"
         exit 1
     }
 }
