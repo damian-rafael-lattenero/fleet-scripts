@@ -47,11 +47,17 @@
 
 const NU: string = "/Users/lattenero/.local/bin/nu-nightly"
 const LOGDIR: string = "/tmp/deploy-all"
-const LEGS: list<record<name: string, label: string, script: string, args: list<string>>> = [
-    {name: "fork",     label: "Fork ZCode (build → --quit swap → reopen)", script: "/Users/lattenero/Projects/ZCode/scripts/build-install.nu", args: ["--quit"]}
-    {name: "brain",    label: "Agent-brain (installDist → restart → /ready)", script: "/Users/lattenero/Projects/agent-brain/scripts/deploy-brain.nu", args: []}
-    {name: "bot",      label: "Bot Kotlin ZCode mirror (build → install → relaunch)", script: "/Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu", args: []}
-    {name: "whatsapp", label: "Bot Kotlin WhatsApp (build → install → relaunch)", script: "/Users/lattenero/Projects/whatsdigest-kt/scripts/deploy-daemon.nu", args: []}
+# kind = the RESOURCE the leg competes for (the scheduling policy is data,
+# not flow — measured 23/11: 3 gradle builds + pnpm at once pushed load to
+# 28 and the bot's 45s verification failed once). The pnpm track runs
+# alone; the gradle track CHAINS its legs inside one subshell — the journal
+# lock serialized them anyway, so the chain matches reality without the
+# contention.
+const LEGS: list<record<name: string, label: string, script: string, args: list<string>, kind: string>> = [
+    {name: "fork",     label: "Fork ZCode (build → --quit swap → reopen)", script: "/Users/lattenero/Projects/ZCode/scripts/build-install.nu", args: ["--quit"], kind: "pnpm"}
+    {name: "brain",    label: "Agent-brain (installDist → restart → /ready)", script: "/Users/lattenero/Projects/agent-brain/scripts/deploy-brain.nu", args: [], kind: "gradle"}
+    {name: "bot",      label: "Bot Kotlin ZCode mirror (build → install → relaunch)", script: "/Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu", args: [], kind: "gradle"}
+    {name: "whatsapp", label: "Bot Kotlin WhatsApp (build → install → relaunch)", script: "/Users/lattenero/Projects/whatsdigest-kt/scripts/deploy-daemon.nu", args: [], kind: "gradle"}
 ]
 
 # POSIX single-quote so a path/arg can never split or interpolate in the sh.
@@ -90,16 +96,16 @@ def leg-line [leg: record<name: string, label: string, script: string, args: lis
 }
 
 # The wave. Prints every leg live; returns one verdict per leg in plan order.
-export def wave [legs: list<record<name: string, label: string, script: string, args: list<string>>>, logdir: path, nu_bin: string]: nothing -> list<record<leg: string, ok: bool, code: int, secs: int, log: string, tail: list<string>>> {
+export def wave [legs: list<record<name: string, label: string, script: string, args: list<string>, kind: string>>, logdir: path, nu_bin: string]: nothing -> list<record<leg: string, ok: bool, code: int, secs: int, log: string, tail: list<string>>> {
     mkdir $logdir
     let stale: list<string> = ($legs | each {|leg| [
         (($logdir | path join $"($leg.name).status") | into string)
         (($logdir | path join $"($leg.name).log") | into string)
     ] } | flatten)
     ^/bin/rm -f ...$stale
-    let body: string = ($legs | each {|leg| leg-line $leg $logdir $nu_bin} | str join (char nl))
-    # `wait` is the rendezvous (no polling): it returns when the four subshells
-    # are done. `exit 0` keeps nu from raising on the last job's status — the
+    let body: string = (wave-body $legs $logdir $nu_bin)
+    # `wait` is the rendezvous (no polling): it returns when every track is
+    # done. `exit 0` keeps nu from raising on the last job's status — the
     # verdicts are the status files, not this shell's exit code.
     ^/bin/bash -c ($body + (char nl) + 'wait' + (char nl) + 'exit 0' + (char nl))
     $legs | each {|leg|
@@ -118,9 +124,10 @@ def main [--dry-run]: nothing -> nothing {
         print $"🧪 (ansi cyan)dry-run — the wave plan, nothing runs(ansi reset):"
         for leg in $LEGS {
             let args: string = ($leg.args | str join ' ')
-            print $"  ($leg.name | fill -a left -w 9)($leg.label)"
+            print $"  ($leg.kind | fill -a left -w 7)($leg.name | fill -a left -w 9)($leg.label)"
             print $"            ($NU) ($leg.script) ($args)"
         }
+        print $"  tracks: pnpm runs ALONE — gradle chains inside one track, the journal lock serializes them"
         return
     }
     print $"🚀 (ansi cyan)the parallel wave — 4 legs, live output(ansi reset) \(fork + brain + bot + whatsapp; the cost is the MAX, not the sum\)"
