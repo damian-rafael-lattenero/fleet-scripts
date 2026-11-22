@@ -7,31 +7,36 @@
 # Verified on nu 0.117.0 with bat 0.26.1.
 
 # Infer the highlight language: explicit override, else the lowercased
-# path extension, else "".
+# path extension, else "". The precedence table (the mode-table law —
+# the else-if chain died in the 22/11 self-audit): explicit first, then
+# the extension, then the empty catch-all.
 export def highlight-language [path?: path, explicit?: string]: nothing -> string {
-    if ($explicit | is-not-empty) {
-        $explicit | str lowercase
-    } else if ($path | is-not-empty) {
-        $path | path parse | get extension | default "" | str lowercase
-    } else {
-        ""
-    }
+    let rows: list<record<lang: string, when: closure>> = [
+        {lang: ($explicit | default "" | str lowercase), when: {|_p: any| ($explicit | default "" | is-not-empty)}}
+        {lang: ($path | default "" | path parse | get extension | default "" | str lowercase), when: {|_p: any| ($path | default "" | is-not-empty)}}
+        {lang: "", when: {|_p: any| true}}
+    ]
+    ($rows | where {|row| do $row.when $path } | first | get lang)
 }
 
 # Highlight a string for the terminal; bat is required off-Nushell.
 # An empty language means "no highlighter known": return the code unchanged.
+# The renderer table (the mode-table law): nu/nushell -> nu-highlight,
+# empty -> passthrough, catch-all -> bat (which gates its own absence).
 export def highlight-text [language: string, code: string]: nothing -> string {
     let lang: string = $language | str lowercase
-    if $lang in ["nu" "nushell"] {
-        $code | nu-highlight
-    } else if ($lang | is-empty) {
-        $code
-    } else {
-        if (which bat | is-empty) {
-            error make {msg: "hl: bat is required for non-Nushell languages (brew install bat)"}
-        }
-        $code | ^bat --plain --color=always --theme=ansi --language $lang
-    }
+    let rows: list<record<when: closure, render: closure>> = [
+        {when: {|_c: string| $lang in ["nu" "nushell"]}, render: {|_c: string| $code | nu-highlight}}
+        {when: {|_c: string| ($lang | is-empty)}, render: {|_c: string| $code}}
+        {when: {|_c: string| true}, render: {|_c: string|
+            if (which bat | is-empty) {
+                error make {msg: "hl: bat is required for non-Nushell languages (brew install bat)"}
+            }
+            $code | ^bat --plain --color=always --theme=ansi --language $lang
+        }}
+    ]
+    let hit: record = ($rows | where {|row| do $row.when $code } | first)
+    do $hit.render $code
 }
 
 # Highlight files, or the piped input when no paths are given.
@@ -357,39 +362,47 @@ def print-nuon [value: any]: nothing -> nothing {
     $value | to nuon --pretty | nu-highlight | print
 }
 
+# The string-value lane (extracted so `out` stays a pure dispatch table).
+def out-string [text: string, compact: bool]: nothing -> nothing {
+    let kind: string = (structured-output-kind $text)
+    if (not $compact) and ($kind == "json") {
+        let parsed: any = (try { $text | from json } catch { $text })
+        let tree: record = (classify-value $parsed)
+        if (fold-tree $tree (has-block-algebra)) {
+            print (fold-tree $tree (render-algebra))
+            return
+        }
+    }
+    if ($kind | is-empty) or ($kind in ["csv" "tsv"]) {
+        print $text
+    } else {
+        let language: string = (if $kind == "jsonl" { "json" } else { $kind })
+        highlight-text $language (structured-output-text $text $kind) | print
+    }
+}
+
 # Terminal counterpart of the ZCode card renderer: structured strings are
 # pretty-printed and colored with bat; tables/lists render with nu's table.
 # CSV/TSV stay as-is (bat has no grammar for them). Values that carry a
 # block leaf (embedded JSON, multi-line text, Nu code) render with the tree;
-# --compact keeps the plain NUON/JSON view instead.
+# --compact keeps the plain NUON/JSON view instead. The top dispatch is a
+# PRIORITY TABLE (the mode-table law — the else-if chain died in the 22/11
+# self-audit): string lane, --compact lane, structure catch-all.
 export def out [--compact]: any -> nothing {
     let value: any = $in
     let description: string = ($value | describe)
-    if ($description | str starts-with "string") {
-        let text: string = $value
-        let kind: string = (structured-output-kind $text)
-        if not $compact and ($kind == "json") {
-            let parsed: any = (try { $text | from json } catch { $text })
-            let tree: record = (classify-value $parsed)
+    let rows: list<record<when: closure, render: closure>> = [
+        {when: {|_v: any| ($description | str starts-with "string")}, render: {|v: any| out-string $v $compact}}
+        {when: {|_v: any| $compact}, render: {|v: any| print-nuon $v}}
+        {when: {|_v: any| true}, render: {|v: any|
+            let tree: record = (classify-value $v)
             if (fold-tree $tree (has-block-algebra)) {
                 print (fold-tree $tree (render-algebra))
-                return
+            } else {
+                print-nuon $v
             }
-        }
-        if ($kind | is-empty) or ($kind in ["csv" "tsv"]) {
-            print $text
-        } else {
-            let language: string = (if $kind == "jsonl" { "json" } else { $kind })
-            highlight-text $language (structured-output-text $text $kind) | print
-        }
-    } else if $compact {
-        print-nuon $value
-    } else {
-        let tree: record = (classify-value $value)
-        if (fold-tree $tree (has-block-algebra)) {
-            print (fold-tree $tree (render-algebra))
-        } else {
-            print-nuon $value
-        }
-    }
+        }}
+    ]
+    let hit: record = ($rows | where {|row| do $row.when $value } | first)
+    do $hit.render $value
 }

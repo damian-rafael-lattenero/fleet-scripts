@@ -6,13 +6,22 @@
 # nushell has no K/M formatter builtin (gap verified on 0.117).
 
 # Render an integer on the raw -> K -> M ladder, trailing zeros trimmed.
+# The ladder is a PRIORITY TABLE (the mode-table law — the else-if chain
+# died in the 22/11 self-audit): rows highest-first, first holding wins,
+# the raw catch-all last.
 export def human-num [x: int]: nothing -> string {
-    if $x >= 1000000 {
-        (($x / 1000000) | math round --precision 2 | into string | str replace -r '\.0+$' "") + "M"
-    } else if $x >= 1000 {
-        (($x / 1000) | math round --precision 2 | into string | str replace -r '\.0+$' "") + "K"
-    } else {
+    let rungs: list<record<min: int, suffix: string>> = [
+        {min: 1000000, suffix: "M"}
+        {min: 1000, suffix: "K"}
+    ]
+    # nullable by construction (no row below min=1000) — the is-empty guard
+    # is the raw catch-all, so the binding stays unannotated (the checker
+    # infers the union; annotating record<...> rejects the null arm)
+    let rung = ($rungs | where {|r| $x >= $r.min } | first)
+    if ($rung | is-empty) {
         $x | into string
+    } else {
+        (($x / $rung.min) | math round --precision 2 | into string | str replace -r '\.0+$' "") + $rung.suffix
     }
 }
 
