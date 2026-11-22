@@ -9,10 +9,17 @@
 
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/deploy-status.log"
 
+# The type aliases (the owner's 22/11 law): the shapes read once, the
+# signatures spell the name.
+type DeployJob = record<job: string, label: string, log: string>
+type JobStatus = record<job: string, state: string, pid: int, written: string, marker: string, last: string>
+type StateRow = record<state: string, when: closure>
+type MarkerRow = record<marker: string, when: closure>
+
 # Nested script nu does NOT load config.nu — the owner's thin theme rides
 # the script itself (measured 21/11).
 $env.config.table.mode = "thin"
-const JOBS: list<record> = [
+const JOBS: list<DeployJob> = [
     {job: "brain", label: "com.zcode.brain-deploy", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-brain.log"}
     {job: "bot", label: "com.zcode.bot-deploy", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-daemon.log"}
     {job: "whatsapp", label: "com.zcode.wd-deploy", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-whatsapp.log"}
@@ -37,10 +44,18 @@ def log-tail [log: string, n: int]: nothing -> list<string> {
     if $out.exit_code != 0 { [] } else { $out.stdout | lines | where {|l| ($l | str trim) != "" } }
 }
 
-def scan [uid: string, j: record]: nothing -> record {
+def scan [uid: string, j: DeployJob]: nothing -> JobStatus {
     let probe: record = (do { ^launchctl print $"gui/($uid)/($j.label)" } | complete)
     let running: bool = (($probe.exit_code == 0) and ($probe.stdout | lines | any {|l| $l =~ "state = running"}))
-    mut state: string = (if ($probe.exit_code != 0) { "not loaded" } else if $running { "RUNNING" } else { "idle" })
+    # the 3-way state classifier as a predicate table — precedence lives in
+    # row order, the catch-all row LAST (the mode-table law; the branch
+    # chain dies).
+    let stateRows: list<StateRow> = [
+        {state: "not loaded", when: {|p: record| $p.exit_code != 0}}
+        {state: "RUNNING", when: {|p| $running}}
+        {state: "idle", when: {|p| true}}
+    ]
+    mut state: string = ($stateRows | where {|r| do $r.when $probe } | first | get state)
     mut pid: int = 0
     if $running {
         let pidRows: list<string> = ($probe.stdout | lines | where {|l| ($l | str trim) =~ '^pid = \d+' })
@@ -61,7 +76,14 @@ def scan [uid: string, j: record]: nothing -> record {
     # Hard-wrap unbreakable tokens (the HikariPool class line lives here
     # too) — the shared mod does the chunking.
     let last: string = (if ($tail | is-empty) { "no log" } else { hard-wrap ($tail | last) 35 })
-    let marker: string = (if ($tail | any {|l| $l =~ '✗|BUILD FAILED' }) { "last run FAILED" } else if ($tail | any {|l| $l =~ '\bdone\b' }) { "last run done" } else { "running or unknown end" })
+    # the end-marker classifier as a predicate table — ✗ convicts first,
+    # then done, then the honest unknown (precedence in row order).
+    let markerRows: list<MarkerRow> = [
+        {marker: "last run FAILED", when: {|ls: list<string>| $ls | any {|l| $l =~ '✗|BUILD FAILED' }}}
+        {marker: "last run done", when: {|ls: list<string>| $ls | any {|l| $l =~ '\bdone\b' }}}
+        {marker: "running or unknown end", when: {|ls| true}}
+    ]
+    let marker: string = ($markerRows | where {|r| do $r.when $tail } | first | get marker)
     if ($j.log | path exists) {
         let age: duration = ((date now) - (ls $j.log | get 0.modified))
         {job: $j.job, state: $state, pid: $pid, written: $"($age) ago", marker: $marker, last: $last}
@@ -74,7 +96,7 @@ def main []: nothing -> nothing {
     let uid: string = (^id -u | str trim)
     let stamp: string = (date now | format date "%Y-%m-%d %H:%M:%S")
     emit $"== deploy-status ($stamp) =="
-    let rows: list<record> = ($JOBS | each {|j| scan $uid $j })
+    let rows: list<JobStatus> = ($JOBS | each {|j| scan $uid $j })
     emit ($rows | select job state pid written marker | table -w 85)
     for r in $rows {
         emit $"($r.job) last line: ($r.last | str substring 0..69)"
