@@ -46,6 +46,16 @@
 #   zcode-deploy-all              # the real wave (owner's call, from Ghostty)
 
 const NU: string = "/Users/lattenero/.local/bin/nu-nightly"
+
+# The type aliases (nu 0.117 `type` keyword — discovered 21/11 from the
+# parser's own error message). The shape reads once and every signature
+# spells it — the no-opaque-types law satisfied by the language itself.
+# The union alias ("pnpm" | "gradle") does NOT parse yet (measured) — the
+# LEGS rows carry the kind discipline.
+type DeployLeg = record<name: string, label: string, script: string, args: list<string>, kind: string>
+type DeployWave = list<DeployLeg>
+type LegVerdict = record<leg: string, ok: bool, code: int, secs: int, log: string, tail: list<string>>
+type LegVerdicts = list<LegVerdict>
 const LOGDIR: string = "/tmp/deploy-all"
 # kind = the RESOURCE the leg competes for (the scheduling policy is data,
 # not flow — measured 23/11: 3 gradle builds + pnpm at once pushed load to
@@ -53,7 +63,7 @@ const LOGDIR: string = "/tmp/deploy-all"
 # alone; the gradle track CHAINS its legs inside one subshell — the journal
 # lock serialized them anyway, so the chain matches reality without the
 # contention.
-const LEGS: list<record<name: string, label: string, script: string, args: list<string>, kind: string>> = [
+const LEGS: list<DeployLeg> = [
     {name: "fork",     label: "Fork ZCode (build → --quit swap → reopen)", script: "/Users/lattenero/Projects/ZCode/scripts/build-install.nu", args: ["--quit"], kind: "pnpm"}
     {name: "brain",    label: "Agent-brain (installDist → restart → /ready)", script: "/Users/lattenero/Projects/agent-brain/scripts/deploy-brain.nu", args: [], kind: "gradle"}
     {name: "bot",      label: "Bot Kotlin ZCode mirror (build → install → relaunch)", script: "/Users/lattenero/Projects/zcode-bot-kotlin/scripts/deploy-daemon.nu", args: [], kind: "gradle"}
@@ -65,11 +75,13 @@ def sh-quote [s: string]: nothing -> string {
     "'" + ($s | str replace -a "'" "'\\''") + "'"
 }
 
-# One bash line per leg: the leg's stream goes to its log (raw) AND to this
+# One bash group per leg: the leg's stream goes to its log (raw) AND to this
 # script's stdout (prefixed). `< /dev/null` is the SIGTTIN cure: a subshell is
 # a background process group on the session TTY, and gradle's terminal probe
 # (Jansi ioctl) would freeze the leg "Stopped" on a read (measured 15/11).
-def leg-line [leg: record<name: string, label: string, script: string, args: list<string>>, logdir: path, nu_bin: string]: nothing -> string {
+# NO trailing `&` — the caller owns the scheduling (solo legs get `&`, the
+# gradle legs chain inside one track group).
+def leg-body [leg: DeployLeg, logdir: path, nu_bin: string]: nothing -> string {
     let log: string = (($logdir | path join $"($leg.name).log") | into string)
     let status: string = (($logdir | path join $"($leg.name).status") | into string)
     let prefix: string = $"[($leg.name)] "
@@ -90,13 +102,26 @@ def leg-line [leg: record<name: string, label: string, script: string, args: lis
         '< /dev/null;'
         'code=$?; t1=$(date +%s);'
         'printf "%s %s\n" "$code" "$((t1-t0))" >' (sh-quote $status)
-        ') &'
+        ')'
     ]
     $parts | str join ' '
 }
 
+# The scheduling policy as data: the pnpm legs run each in their own
+# background group; the gradle legs CHAIN inside ONE background group (the
+# journal lock serialized them anyway — the chain removes the contention and
+# the saturation timeouts without giving up the fork's parallelism). The
+# cost = MAX(fork, sum(gradle)) with zero verification races.
+def wave-body [legs: DeployWave, logdir: path, nu_bin: string]: nothing -> string {
+    let solo: list<string> = ($legs | where kind == "pnpm" | each {|leg| (leg-body $leg $logdir $nu_bin) + ' &' })
+    let gradle: list<string> = ($legs | where kind == "gradle" | each {|leg| leg-body $leg $logdir $nu_bin })
+    let parts: list<string> = ($solo
+        | append (if ($gradle | is-empty) { [] } else { ['(' ] ++ $gradle ++ [') &'] }))
+    $parts | flatten | str join (char nl)
+}
+
 # The wave. Prints every leg live; returns one verdict per leg in plan order.
-export def wave [legs: list<record<name: string, label: string, script: string, args: list<string>, kind: string>>, logdir: path, nu_bin: string]: nothing -> list<record<leg: string, ok: bool, code: int, secs: int, log: string, tail: list<string>>> {
+export def wave [legs: DeployWave, logdir: path, nu_bin: string]: nothing -> list<LegVerdict> {
     mkdir $logdir
     let stale: list<string> = ($legs | each {|leg| [
         (($logdir | path join $"($leg.name).status") | into string)
@@ -133,7 +158,7 @@ def main [--dry-run]: nothing -> nothing {
     print $"🚀 (ansi cyan)the parallel wave — 4 legs, live output(ansi reset) \(fork + brain + bot + whatsapp; the cost is the MAX, not the sum\)"
     print $"   logs: ($LOGDIR)/<leg>.log — every line below is prefixed with its leg"
     let t0: datetime = (date now)
-    let wave: list<record<leg: string, ok: bool, code: int, secs: int, log: string, tail: list<string>>> = (wave $LEGS $LOGDIR $NU)
+    let wave: LegVerdicts = (wave $LEGS $LOGDIR $NU)
     let total: string = ((date now) - $t0 | into string)
     print $"── wave finished in ($total) ──"
     let failed: list<record> = ($wave | where {|w| not $w.ok})
