@@ -38,7 +38,10 @@ def repos []: nothing -> list<string> {
 }
 
 def main-branch [repo: string]: nothing -> string {
-    for b in ["master" "main"] {
+    # damian rides AFTER the defaults: the fork's main line IS damian
+    # (the T3 owner-side observation — ZCode always read as "skip" because
+    # only master/main were probed; PROTECTED already knew the name)
+    for b in ["master" "main" "damian"] {
         if ((do { ^git -C $repo rev-parse --verify $b } | complete).exit_code == 0) { return $b }
     }
     ""
