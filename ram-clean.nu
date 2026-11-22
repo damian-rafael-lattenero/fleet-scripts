@@ -11,8 +11,10 @@
 #   2. ollama pattern: the brain's embedder (nomic-embed) STAYS, every
 #      other loaded model is stopped (stop != delete; they reload on demand)
 #   3. AppleSpell killed (macOS growth bug; respawns small on demand)
-#   4. idle gradle daemons killed (respawn on the next build; a BUILDING
-#      daemon breathes above the idle threshold and is never touched)
+#   4. idle build daemons killed — Gradle AND Kotlin compile daemons
+#      (both respawn on the next build; a BUILDING daemon breathes above
+#      the idle threshold and is never touched; the kotlin ones are the
+#      build-day accumulators behind the metaspace OOM)
 #   5. the Logi Options+ family: reported with RSS totals and the web
 #      receipts — only its crash reporter is auto-killed; replacing the
 #      daemon is the owner's decision (measured ~1.0 GB across processes)
@@ -37,6 +39,9 @@ const KEEP_OLLAMA: string = "nomic-embed"
 # cpu percent under which a process counts as idle. A live turn or an
 # active build breathes well above this; abandoned things sit at 0.
 const IDLE_CPU: float = 1.0
+# Swap left after a clean above which the honest line speaks: pages of
+# SURVIVING processes decompress only on touch — the floor is reboot-only.
+const SWAP_STALE_MB: int = 2048
 
 # The type aliases (the owner's 22/11 law): every shape reads once and the
 # signatures spell the name. The nullable family is oneof<string, nothing> —
@@ -430,17 +435,21 @@ def main [
         $spell
     } else { [] })
 
-    # 4. idle gradle daemons (an ACTIVE build breathes above the threshold).
-    let gradles: list<CpuRow> = (^ps -axo pid=,pcpu=,args=
+    # 4. idle build daemons — Gradle AND Kotlin compile daemons, matched by
+    #    their daemon markers (the java family also holds LIVE infra —
+    #    brain/whatsdigest/bot daemons idle between work and are never
+    #    touched; markers keep the class safe). Both respawn on the next
+    #    build; an ACTIVE build breathes above the threshold.
+    let builds: list<CpuRow> = (^ps -axo pid=,pcpu=,args=
         | lines
-        | where {|l| $l =~ 'GradleDaemon' }
+        | where {|l| $l =~ 'GradleDaemon|KotlinCompileDaemon' }
         | each {|l| pid-cpu $l }
         | where {|r| $r.cpu < $IDLE_CPU })
-    emit $"idle gradle daemons: ($gradles | length) — pids ($gradles | get pid | str join ', ')"
-    let gradleKills: list<int> = (if $clean and (($gradles | length) > 0) {
-        kill ...($gradles | get pid)
-        emit $"killed gradle daemons: ($gradles | get pid | str join ', ')"
-        $gradles | get pid
+    emit $"idle build daemons — gradle+kotlin: ($builds | length) — pids ($builds | get pid | str join ', ')"
+    let buildKills: list<int> = (if $clean and (($builds | length) > 0) {
+        kill ...($builds | get pid)
+        emit $"killed build daemons: ($builds | get pid | str join ', ')"
+        $builds | get pid
     } else { [] })
 
     # 5. LoginItems — the macOS host of the login-item daemons (the Logi
@@ -497,7 +506,7 @@ def main [
                 }
             }
         }
-        for line in [(do $deadCheck "islands" $isleKills) (do $deadCheck "gradle daemons" $gradleKills)] {
+        for line in [(do $deadCheck "islands" $isleKills) (do $deadCheck "build daemons" $buildKills)] {
             if ($line != "") { emit $line }
         }
         let respawnCheck: closure = {|label: string, pids: list<int>, name: string|
@@ -535,8 +544,16 @@ def main [
         }
         let freeAfter: int = (free-pct)
         let swapAfter: string = (swap-line)
+        let swapUsedAfter: int = (swap-used-mb)
         emit $"after: free ($freeAfter)% · swap ($swapAfter)"
-        emit $"freed: ($freeAfter - $freeBefore) points of free percentage"
+        emit $"freed: ($freeAfter - $freeBefore) points of free percentage · swap Δ ($swapUsedAfter - $swapUsed) MB"
+        # The honest swap ceiling: killed processes release their swapped
+        # pages (the Δ above), but pages of SURVIVING processes decompress
+        # only on touch — the only full swap reset is a reboot (flushing
+        # dynamic_pager needs SIP off and risks freezes — not sanctioned).
+        if $swapUsedAfter > $SWAP_STALE_MB {
+            emit $"swap: ($swapUsedAfter) MB remain — memory is clean, the swap floor is reboot-only"
+        }
     } else {
         emit "plan only — re-run with --clean to execute"
     }
