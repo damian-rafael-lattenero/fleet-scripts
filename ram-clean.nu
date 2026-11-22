@@ -19,8 +19,11 @@
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/ram-clean.log"
 # The leak ledger: one JSONL snapshot per run (families + free + swap), so
 # the NEXT run can compute the growth — a leak is memory that CREATES ITSELF
-# between runs and never comes back.
+# between runs and never comes back. Pruned on every write to the last
+# LEDGER_BOOTS boots — the file never grows unbounded.
 const SNAP_FILE: string = "/Users/lattenero/Library/Logs/ram-snapshots.jsonl"
+# How many boots the ledger keeps; older boots leave on the next write.
+const LEDGER_BOOTS: int = 10
 # The brain's embedder — the ONLY ollama model that stays loaded.
 const KEEP_OLLAMA: string = "nomic-embed"
 # cpu percent under which a process counts as idle. A live turn or an
@@ -38,8 +41,13 @@ type FamilyRule = record<pattern: string, family: oneof<string, nothing>>
 type FamilySum = record<family: string, rssMb: int, n: int>
 type LeakRow = record<family: string, nowMb: int, runDelta: int, bootDelta: int>
 type Snapshot = record<stamp: string, boot: int, free: int, swapUsedMb: int, procs: list<FamilySum>>
+# A prior-run lookup from the ledger as the nushell-fp Option shape (union
+# aliases don't parse, measured — the kind lives in the tag row):
+# {tag: "some", value: Snapshot} | {tag: "none", value: null}.
+type Prior = record<tag: string, value: any>
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use /Users/lattenero/Projects/nushell-fp/mods/types.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
@@ -123,35 +131,44 @@ def families []: nothing -> list<FamilySum> {
     | sort-by -r rssMb
 }
 
-# Append this run's snapshot to the JSONL ledger and return it.
-def snapshot-write [boot: int, free: int, swapUsedMb: int]: nothing -> Snapshot {
-    let fams: list<FamilySum> = (families | first 60)
+# Write this run's snapshot to the JSONL ledger — ONE whole-file write that
+# also prunes: only the last LEDGER_BOOTS boots survive, so the boot
+# baseline is never evicted and the file never grows unbounded. The family
+# rows arrive as input: the SAME feed the leak diff reads, one ps truth.
+def snapshot-write [rows: list<Snapshot>, fams: list<FamilySum>, boot: int, free: int, swapUsedMb: int]: nothing -> Snapshot {
     let rec: Snapshot = {
         stamp: (date now | format date "%Y-%m-%d %H:%M:%S")
         boot: $boot
         free: $free
         swapUsedMb: $swapUsedMb
-        procs: ($fams | each {|f| {family: $f.family, rssMb: $f.rssMb, n: $f.n} })
+        procs: $fams
     }
-    (($rec | to json -r) + (char nl)) | save --append --raw $SNAP_FILE
+    let boots: list<int> = ($rows | get boot | uniq | last $LEDGER_BOOTS)
+    let kept: list<Snapshot> = ($rows | where {|r| $r.boot in $boots } | append $rec)
+    (($kept | each {|r| $r | to json -r } | str join (char nl)) + (char nl)) | save --force --raw $SNAP_FILE
     $rec
 }
 
-# The last snapshot in the ledger — null when this is the first run.
-def last-snapshot []: nothing -> any {
-    if not ($SNAP_FILE | path exists) { return null }
-    let lines: list<string> = (open --raw $SNAP_FILE | lines | where {|l| ($l | str trim) != "" })
-    if ($lines | is-empty) { return null }
-    try { $lines | last | from json } catch { null }
+# The ledger parsed ONCE at the boundary — every run reads the file a
+# single time; corrupt lines drop, the body never re-reads the disk.
+def ledger-rows []: nothing -> list<Snapshot> {
+    if not ($SNAP_FILE | path exists) { return [] }
+    open --raw $SNAP_FILE
+    | lines
+    | where {|l| ($l | str trim) != "" }
+    | each {|l| try { $l | from json } catch { null } }
+    | compact
+}
+
+# The last snapshot in the ledger — none when this is the first run.
+def last-snapshot [rows: list<Snapshot>]: nothing -> Prior {
+    if ($rows | is-empty) { none } else { some ($rows | last) }
 }
 
 # The first snapshot of the CURRENT boot — the since-boot growth baseline.
-def boot-snapshot [boot: int]: nothing -> any {
-    if not ($SNAP_FILE | path exists) { return null }
-    let lines: list<string> = (open --raw $SNAP_FILE | lines | where {|l| ($l | str trim) != "" })
-    let rows: list<record> = ($lines | each {|l| try { $l | from json } catch { null } } | compact)
-    let sameBoot: list<record> = ($rows | where boot == $boot)
-    if ($sameBoot | is-empty) { null } else { $sameBoot | first }
+def boot-snapshot [rows: list<Snapshot>, boot: int]: nothing -> Prior {
+    let sameBoot: list<Snapshot> = ($rows | where boot == $boot)
+    if ($sameBoot | is-empty) { none } else { some ($sameBoot | first) }
 }
 
 # The per-family RSS lookup of one snapshot — 0 when the family is absent
@@ -162,22 +179,25 @@ def fam-rss [snap: Snapshot, family: string]: nothing -> int {
 }
 
 # The leak detector: growth since the last run AND since the boot, per
-# family, flagged at the thresholds. A null snapshot = first run = baseline.
+# family, flagged at the thresholds. The baselines arrive as Prior Options
+# and eliminate ONCE at the top — below the guard every value is a
+# Snapshot, never a mid-pipeline null probe.
 def leak-report [
-    now: list<FamilySum>, prev: any, bootSnap: any,
+    now: list<FamilySum>, prev: Prior, bootSnap: Prior,
     leakRunMb: int, leakBootMb: int, swapUsedMb: int,
 ]: nothing -> nothing {
-    let prevSwap: int = (if $prev != null { $prev.swapUsedMb? | default 0 } else { $swapUsedMb })
-    let bootSwap: int = (if $bootSnap != null { $bootSnap.swapUsedMb? | default 0 } else { $swapUsedMb })
-    if $prev == null {
+    if $prev.tag == "none" {
         emit "leak ledger: baseline captured — run again later and the growth per family appears here"
         emit $"swap used now: ($swapUsedMb) MB"
         return
     }
+    let prevSnap: Snapshot = $prev.value
+    let prevSwap: int = ($prevSnap.swapUsedMb? | default 0)
+    let bootSwap: int = ($bootSnap | option-match {|s| $s.swapUsedMb? | default 0 } {|| $swapUsedMb })
     let rows: list<LeakRow> = ($now
         | each {|f|
-            let before: int = (if $prev != null { fam-rss $prev $f.family } else { 0 })
-            let atBoot: int = (if $bootSnap != null { fam-rss $bootSnap $f.family } else { 0 })
+            let before: int = (fam-rss $prevSnap $f.family)
+            let atBoot: int = ($bootSnap | option-match {|s| fam-rss $s $f.family } {|| 0 })
             {
                 family: $f.family
                 nowMb: $f.rssMb
@@ -221,7 +241,7 @@ def protect-set [ps: list<PsRow>]: nothing -> list<int> {
 }
 
 # zcode-cli candidates: the binary, outside the protect set, idle cpu.
-def islands [ps: list<PsRow>, prot: list<int>]: nothing -> list<CpuRow> {
+def islands [prot: list<int>]: nothing -> list<CpuRow> {
     ^ps -axo pid=,ppid=,pcpu=,args=
     | lines
     | where {|l| $l =~ '\bzcode-cli\b' }
@@ -250,11 +270,14 @@ def main [
     let swapUsed: int = (swap-used-mb)
     emit $"== ram-clean ($stamp) — clean=($clean) =="
 
-    # -1. the leak ledger: snapshot now, diff against the last run and the boot.
-    let prev: any = (last-snapshot)
-    let bootSnap: any = (boot-snapshot $boot)
-    let snap: Snapshot = (snapshot-write $boot $freeBefore $swapUsed)
-    leak-report (families) $prev $bootSnap $leak_run_mb $leak_boot_mb $swapUsed
+    # -1. the leak ledger: read ONCE, write ONCE (pruned), diff the SAME
+    #     family feed — one ps truth for the snapshot and the leak report.
+    let ledger: list<Snapshot> = (ledger-rows)
+    let prev: Prior = (last-snapshot $ledger)
+    let bootSnap: Prior = (boot-snapshot $ledger $boot)
+    let fams: list<FamilySum> = (families | first 60)
+    snapshot-write $ledger $fams $boot $freeBefore $swapUsed
+    leak-report $fams $prev $bootSnap $leak_run_mb $leak_boot_mb $swapUsed
 
     # 0. the pattern surface: who holds the memory right now.
     emit $"before: free ($freeBefore)% · swap ($swapBefore)"
@@ -262,7 +285,7 @@ def main [
     emit (rss-snap | sort-by -r rssMb | first 10 | select name pid rssMb cpu | table)
 
     # 1. Task-Island zcode-cli processes.
-    let isles: list<CpuRow> = (islands $ps $prot)
+    let isles: list<CpuRow> = (islands $prot)
     emit $"islands: ($isles | length) idle zcode-cli candidates — pids ($isles | get pid | str join ', ')"
     if $clean and (($isles | length) > 0) {
         kill ...($isles | get pid)
