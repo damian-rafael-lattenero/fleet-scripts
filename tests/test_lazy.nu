@@ -6,7 +6,7 @@ use ../mods/lazy.nu *
 # 1. the thunk builds free: the side effect does NOT run at build time.
 # The marker path must NOT pre-exist — mktemp CREATES its file and would
 # lie about the deference (measured 21/11).
-let marker: path = ($"($env.TMPDIR | default /tmp)/lz-(random uuid)")
+let marker: path = ($"($env.TMPDIR? | default /tmp)/lz-(random uuid)")
 let t: record = (thunk {|| "computed!" | save --append --raw $marker; "computed!" })
 assert equal ($marker | path exists) false
 
