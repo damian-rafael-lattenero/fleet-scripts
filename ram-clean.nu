@@ -36,6 +36,11 @@ const SNAP_FILE: string = "/Users/lattenero/Library/Logs/ram-snapshots.jsonl"
 const LEDGER_BOOTS: int = 10
 # The brain's embedder — the ONLY ollama model that stays loaded.
 const KEEP_OLLAMA: string = "nomic-embed"
+# ollama by ABSOLUTE path: this script runs under callers whose PATH is
+# launchd-narrow (the bot daemon's throat spawns it; measured 23:18 the
+# bare `ollama` died the drill right after the island kills — it resolves
+# only in interactive shells where config.nu widens PATH).
+const OLLAMA: string = "/opt/homebrew/bin/ollama"
 # cpu percent under which a process counts as idle. A live turn or an
 # active build breathes well above this; abandoned things sit at 0.
 const IDLE_CPU: float = 1.0
@@ -412,7 +417,7 @@ def main [
     } else { [] })
 
     # 2. ollama pattern: the brain's embedder stays, the rest reload on demand.
-    let ops: record = (do { ollama ps } | complete)
+    let ops: record = (do { run-external $OLLAMA ps } | complete)
     let loaded: list<string> = ($ops.stdout | lines | skip 1
         | where {|l| ($l | str trim) != "" }
         | each {|l| $l | str trim | split row -r '\s+' | get 0 })
@@ -420,7 +425,7 @@ def main [
     emit $"ollama loaded: ($loaded | str join ', ') — keep ($KEEP_OLLAMA), drop: ($droppable | str join ', ')"
     let droppedModels: list<string> = (if $clean and (($droppable | length) > 0) {
         for m in $droppable {
-            let stop: record = (do { ollama stop $m } | complete)
+            let stop: record = (do { run-external $OLLAMA stop $m } | complete)
             emit $"ollama stop ($m): exit ($stop.exit_code)"
         }
         $droppable
@@ -531,7 +536,7 @@ def main [
             }
         }
         if not ($droppedModels | is-empty) {
-            let ops2: record = (do { ollama ps } | complete)
+            let ops2: record = (do { run-external $OLLAMA ps } | complete)
             let loaded2: list<string> = ($ops2.stdout | lines | skip 1
                 | where {|l| ($l | str trim) != "" }
                 | each {|l| $l | str trim | split row -r '\s+' | get 0 })
