@@ -377,14 +377,39 @@ def swap-used-mb [line: string]: nothing -> int {
 }
 
 # THE execute shape, once: when the run is a --clean and there is anything
-# to kill, kill once and speak the receipt. It replaced five verbatim
-# copies of `if $clean and (...) { kill ...; emit ...; $pids } else { [] }`
-# — the sixth copy would have had to remember the guard on its own.
-# label is the whole receipt sentence ("AppleSpell — it respawns on demand").
+# to kill, signal the pids BEST-EFFORT and speak the receipt. It replaced
+# five verbatim copies of `if $clean and (...) { kill ...; emit ...; $pids }
+# else { [] }` — the sixth copy would have had to remember the guard on its
+# own. Per-pid `attempt`, because pids are a SNAPSHOT: a process can exit
+# between the scan and the kill, and `kill` raises "process didn't terminate
+# successfully" on a stale pid — one dead crashpad used to abort the whole
+# run before the receipts pass (measured 24/11, exit 1, no stderr). An
+# already-gone pid is a named outcome, never a failure.
 def kill-when [clean: bool, label: string, pids: list<int>]: nothing -> list<int> {
     if (not $clean) or ($pids | is-empty) { return [] }
-    kill ...$pids
-    emit $"killed ($label): ($pids | str join ', ')"
+    let tries: list<record<pid: int, ok: bool>> = ($pids | each {|p|
+        {pid: $p, ok: ((attempt {|| kill $p }).tag == "ok")}
+    })
+    let signalled: list<int> = ($tries | where ok | get pid)
+    let failed: list<int> = ($tries | where {|t| not $t.ok} | get pid)
+    if not ($signalled | is-empty) {
+        emit $"killed ($label): ($signalled | str join ', ')"
+    }
+    # A failed signal is TWO different facts — nu's kill error carries no
+    # errno, so ask ps: absent = already gone (harmless), present = the
+    # signal was refused (a root-owned process, measured 24/11: a Logi
+    # crashpad runs as root and ESRCH/EPERM read the same to nu).
+    if not ($failed | is-empty) {
+        let probe: record = (^ps -p ($failed | str join ',') -o pid= | complete)
+        let still: list<int> = ($probe.stdout | lines | where {|l| ($l | str trim) != "" } | each {|l| $l | str trim | into int })
+        let gone: list<int> = ($failed | where {|p| not ($p in $still)})
+        if not ($gone | is-empty) {
+            emit $"($label): already gone — no signal needed: ($gone | str join ', ')"
+        }
+        if not ($still | is-empty) {
+            emit $"($label): signal refused — still alive: ($still | str join ', ')"
+        }
+    }
     $pids
 }
 
