@@ -2,6 +2,8 @@
 # allowlist, the trufflehog JSON-lines parse, the verified filter, the honest
 # tail message and the redacted finding lines. The script keeps the git/
 # gitleaks/trufflehog effects.
+use ./json-lines.nu *
+
 export const DEEP_PATHS: list<string> = [
     '(^|/)node_modules/'
     '(^|/)\.gradle/'
@@ -28,13 +30,10 @@ export def deep-allowed [f: string]: nothing -> bool {
 }
 
 # trufflehog --json emits one JSON object per line; garbage lines are
-# skipped (a scanner's noise is not a finding). `from json` is LENIENT on
-# 0.117 — a non-JSON line comes back as the string itself, so the record
-# filter is what makes the parse honest (measured here).
+# skipped (a scanner's noise is not a finding). The parse itself is the
+# shared lib/json-lines.nu piece (0.117's from json is LENIENT).
 export def json-rows [stdout: string]: nothing -> list<any> {
-    $stdout | lines | where {|l| ($l | str trim | is-not-empty) }
-    | each {|l| try { $l | from json } catch { null } }
-    | where {|o| ($o | describe) =~ '^record' }
+    record-lines $stdout
 }
 
 # THE history answer that matters: live credentials only (a fake fixture
