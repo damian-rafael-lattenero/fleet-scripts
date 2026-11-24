@@ -73,8 +73,10 @@ assert equal (render-param '--k: int = 5') '--k <int>'
 assert equal (render-param '--fix') '--fix'
 assert equal (render-param '...scopes: string') '...scopes <string>'
 
-# 8. clip: short text is untouched, long text breaks at a word and says so.
-assert equal (clip 'short' 10) 'short'
-assert equal (clip 'one two three four five six' 12) 'one two…'
+# 8. description-of and arguments-of agree with the kind discipline: a script
+#    row and an alias row are both complete Commands (the listing needs no
+#    extra lookup).
+assert equal ($a | get kind | uniq) ['alias']
+assert equal ($rows | get kind | uniq) ['script']
 
 print "lib/fleet ok"

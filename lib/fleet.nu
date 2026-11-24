@@ -9,19 +9,19 @@
 # resolve is TOTAL: it answers 0 or 1 row. The decision to refuse an unknown
 # verb belongs to the edge (main), never to the table.
 
-export type Command = record<verb: string, script: string>
+export type Command = record<verb: string, script: string, kind: string>
 
 # healthcheck is the fleet-healthcheck skill's script (the 11-leg battery the
 # phone's /fleet_healthcheck also runs) — one copy, not a second script.
 export def aliases [root: path, healthcheck: path]: nothing -> list<Command> {
     let dir: path = ($root | path join 'scripts')
     [
-        {verb: 'deploy-all', script: ($dir | path join 'zcode-deploy-all.nu' | into string)}
-        {verb: 'deploy-brain', script: ($dir | path join 'zcode-brain-deploy.nu' | into string)}
-        {verb: 'deploy-fork', script: ($dir | path join 'zcode-fork-deploy.nu' | into string)}
-        {verb: 'deploy-bot', script: ($dir | path join 'zcode-bot-kotlin-deploy.nu' | into string)}
-        {verb: 'deploy-whatsapp', script: ($dir | path join 'zcode-whatsapp-kotlin-deploy.nu' | into string)}
-        {verb: 'healthcheck', script: ($healthcheck | into string)}
+        {verb: 'deploy-all', script: ($dir | path join 'zcode-deploy-all.nu' | into string), kind: 'alias'}
+        {verb: 'deploy-brain', script: ($dir | path join 'zcode-brain-deploy.nu' | into string), kind: 'alias'}
+        {verb: 'deploy-fork', script: ($dir | path join 'zcode-fork-deploy.nu' | into string), kind: 'alias'}
+        {verb: 'deploy-bot', script: ($dir | path join 'zcode-bot-kotlin-deploy.nu' | into string), kind: 'alias'}
+        {verb: 'deploy-whatsapp', script: ($dir | path join 'zcode-whatsapp-kotlin-deploy.nu' | into string), kind: 'alias'}
+        {verb: 'healthcheck', script: ($healthcheck | into string), kind: 'alias'}
     ]
 }
 
@@ -29,7 +29,7 @@ export def aliases [root: path, healthcheck: path]: nothing -> list<Command> {
 export def verbs [files: list<string>]: nothing -> list<Command> {
     $files
     | where {|p| ($p | path basename) != 'fleet.nu'}
-    | each {|p| {verb: ($p | path parse | get stem), script: $p}}
+    | each {|p| {verb: ($p | path parse | get stem), script: $p, kind: 'script'}}
 }
 
 export def verb-table [alias_rows: list<Command>, file_rows: list<Command>]: nothing -> list<Command> {
@@ -147,20 +147,15 @@ export def arguments-of [src: string]: nothing -> string {
     ($labels | str join ' · ')
 }
 
-export def clip [text: string, max: int]: nothing -> string {
-    if (($text | str length) <= $max) { return $text }
-    (($text | str substring 0..$max | str replace --regex '\s+\S*$' '') + '…')
-}
-
 # The header's prose paragraph starting at line N: consecutive comment lines,
 # joined (a description cut at the first line reads like a telegram —
-# "the ergonomics layer over the" — so the whole paragraph rides).
+# "the ergonomics layer over the" — so the whole paragraph rides). No clipping:
+# `commands` shows full doc comments, and this table is its twin.
 def paragraph [lines: list<string>, start: int]: nothing -> string {
     let window: list<string> = ($lines | skip $start | take 4)
     let parts: list<string> = ($window | where {|l| $l | str starts-with '#'} | each {|l| $l | str replace --regex '^#+\s*' ''})
     let joined: string = ($parts | str join ' ')
-    let text: string = ($joined | str replace --regex '^\S+\.nu [—-] ' '')
-    (clip $text 110)
+    ($joined | str replace --regex '^\S+\.nu [—-] ' '')
 }
 
 # The script's own one-liner: the header's `<name>.nu — ...` paragraph, or the

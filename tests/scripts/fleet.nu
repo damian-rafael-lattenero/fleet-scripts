@@ -21,6 +21,7 @@ assert equal (((^readlink $FLEET | str trim) | path expand)) ($HUB | path join '
 let rows: list<Command> = (verb-table (aliases $HUB $HC) (verbs (glob ($HUB | path join 'scripts' '*.nu'))))
 for r in $rows {
     assert equal ($r.script | path exists) true $"verb ($r.verb): missing script — ($r.script)"
+    assert ($r.kind in ['script' 'alias']) $"verb ($r.verb): kind must be script or alias, got ($r.kind)"
     let src: string = (open --raw $r.script)
     assert ((description-of $src) != '-') $"verb ($r.verb): no header paragraph to describe it"
     assert ((arguments-of $src) != '') $"verb ($r.verb): empty arguments cell"
