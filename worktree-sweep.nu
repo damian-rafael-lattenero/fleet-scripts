@@ -28,13 +28,11 @@ const ORPHAN_MIN_AGE: duration = 1hr
 $env.config.table.mode = "thin"
 const PROTECTED: list<string> = [master main damian develop]
 
-# The type aliases (the owner's 22/11 law): the shapes read once, the
-# signatures spell the name.
-type SweepRow = record<repo: string, item: string, action: string, why: string>
-type WtEntry = record<path: string, branch: string>
-type VerdictRule = record<action: string, why: string, when: closure>
-
+# The sweep shapes ride lib/worktree-sweep.nu (tested); the porcelain parse
+# rides lib/worktree.nu.
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use lib/worktree.nu *
+use lib/worktree-sweep.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
@@ -51,11 +49,13 @@ def repos []: nothing -> list<string> {
 def main-branch [repo: string]: nothing -> string {
     # damian rides AFTER the defaults: the fork's main line IS damian
     # (the T3 owner-side observation — ZCode always read as "skip" because
-    # only master/main were probed; PROTECTED already knew the name)
-    for b in ["master" "main" "damian"] {
-        if ((do { ^git -C $repo rev-parse --verify $b } | complete).exit_code == 0) { return $b }
-    }
-    ""
+    # only master/main were probed; PROTECTED already knew the name). The
+    # choice itself lives in lib/worktree.nu (pick-branch-of, tested).
+    let candidates: list<string> = ["master" "main" "damian"]
+    let present: list<string> = ($candidates | where {|b|
+        ((do { ^git -C $repo rev-parse --verify $b } | complete).exit_code == 0)
+    })
+    pick-branch-of $candidates $present
 }
 
 # merged local branch names, current marker stripped, protected excluded.
@@ -75,11 +75,7 @@ def merged-locals [repo: string, mb: string]: nothing -> list<string> {
 def branch-in-worktrees [repo: string]: nothing -> list<string> {
     let out: record = (do { ^git -C $repo worktree list --porcelain } | complete)
     if $out.exit_code != 0 { return [] }
-    $out.stdout
-    | split row "\n\n"
-    | each {|b| $b | lines | where {|l| $l =~ '^branch ' } | get -o 0 }
-    | compact
-    | each {|l| $l | str replace 'branch refs/heads/' '' }
+    porcelain-blocks $out.stdout | get branch | where {|b| $b | is-not-empty }
 }
 
 def audit [repo: string]: nothing -> list<SweepRow> {
@@ -89,28 +85,14 @@ def audit [repo: string]: nothing -> list<SweepRow> {
     if $wtOut.exit_code != 0 { return [{repo: ($repo | path basename), item: "-", action: "skip", why: "git worktree list failed"}] }
     let inWts: list<string> = (branch-in-worktrees $repo)
     let merged: list<string> = (merged-locals $repo $mb)
-    # worktrees beyond the main one: candidate when the branch is merged
-    # and the tree is clean (git refuses the rest even at --clean time).
-    let wts: list<WtEntry> = ($wtOut.stdout
-        | str trim
-        | split row "\n\n"
-        | skip 1
-        | each {|b|
-            let lines: list<string> = ($b | lines)
-            {path: ($lines | where {|l| $l =~ '^worktree ' } | get 0 | str replace 'worktree ' ''),
-             branch: (($lines | where {|l| $l =~ '^branch ' } | get -o 0 | default "") | str replace 'branch refs/heads/' '')}
-        })
+    # worktrees beyond the main one (lib/worktree.nu's linked-blocks):
+    # candidate when the branch is merged and the tree is clean (git refuses
+    # the rest even at --clean time). The verdict table rides the lib.
+    let wts: list<PorcelainBlock> = (linked-blocks $wtOut.stdout)
     let wtRows: list<SweepRow> = ($wts | each {|w|
         let dirty: bool = (((do { ^git -C $w.path status --porcelain } | complete).stdout | str trim) != "")
-        # the sweep-verdict classifier as a predicate table (the mode-table
-        # law): dirty convicts first, then not-merged, then the catch-all.
-        let rules: list<VerdictRule> = [
-            {action: "KEEP", why: "dirty working tree", when: {|d: bool| $d}}
-            {action: "KEEP", why: $"not merged into ($mb)", when: {|d: bool| not ($w.branch in $merged)}}
-            {action: "CLEAN-able", why: "merged + clean", when: {|d: bool| true}}
-        ]
-        let hit: VerdictRule = ($rules | where {|r| do $r.when $dirty } | first)
-        {repo: ($repo | path basename), item: $"($w.branch) at ($w.path)", action: $hit.action, why: $hit.why}
+        let v: record<action: string, why: string> = (wt-verdict $dirty ($w.branch in $merged) $mb)
+        {repo: ($repo | path basename), item: $"($w.branch) at ($w.path)", action: $v.action, why: $v.why}
     })
     # merged local branches not checked out anywhere and not the main line.
     let brRows: list<SweepRow> = ($merged
@@ -133,15 +115,9 @@ def orphan-audit []: nothing -> list<SweepRow> {
         let dotgit: string = ($d.name + "/.git")
         let isClone: bool = (($dotgit | path exists) and (($dotgit | path type) == "dir"))
         let originLive: bool = ((do { ^git -C $d.name remote get-url origin } | complete).exit_code == 0)
-        let ageH: int = (((date now) - $d.modified) / 1hr | math floor)
-        let rules: list<VerdictRule> = [
-            {action: "KEEP", why: "real worktree — the repo audit owns it", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| not $c.isClone }}
-            {action: "KEEP", why: "clone with origin — someone's real checkout", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| $c.originLive }}
-            {action: "ORPHAN-able", why: "clone fixture, no origin — past the age gate", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| $c.ageH >= ($ORPHAN_MIN_AGE / 1hr) }}
-            {action: "KEEP", why: "clone fixture fresh — below the age gate, a live test may own it", when: {|c: record<isClone: bool, originLive: bool, ageH: int>| true }}
-        ]
-        let hit: VerdictRule = ($rules | where {|r| do $r.when {isClone: $isClone, originLive: $originLive, ageH: $ageH} } | first)
-        {repo: "orphan", item: $d.name, action: $hit.action, why: $"($hit.why) — age ($ageH)h"}
+        let ageH: int = (age-h $d.modified (date now))
+        let v: record<action: string, why: string> = (orphan-verdict $isClone $originLive $ageH ($ORPHAN_MIN_AGE / 1hr | into int))
+        {repo: "orphan", item: $d.name, action: $v.action, why: $"($v.why) — age ($ageH)h"}
     }
 }
 
@@ -153,12 +129,11 @@ def sweep-exec [r: SweepRow, remote: bool]: nothing -> nothing {
         {when: {|rr: SweepRow| $rr.action =~ 'ORPHAN'}
          run: {|| rm -rf $r.item; emit $"orphan fixture removed: ($r.item)" }}
         {when: {|rr: SweepRow| $rr.action =~ 'CLEAN'}
-         run: {|| let path: string = ($r.item | split row " at " | get 1)
-                 let wrem: record = (do { ^git worktree remove $path } | complete)
-                 emit $"worktree remove ($path): exit ($wrem.exit_code)"
-                 let br: string = ($r.item | split row " at " | get 0)
-                 let bd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) branch -d $br } | complete)
-                 emit $"branch -d ($br): exit ($bd.exit_code)" }}
+         run: {|| let parts: record<branch: string, path: string> = (item-parts $r.item)
+                 let wrem: record = (do { ^git worktree remove $parts.path } | complete)
+                 emit $"worktree remove ($parts.path): exit ($wrem.exit_code)"
+                 let bd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) branch -d $parts.branch } | complete)
+                 emit $"branch -d ($parts.branch): exit ($bd.exit_code)" }}
         {when: {|rr: SweepRow| true}
          run: {|| let bd: record = (do { ^git -C /Users/lattenero/Projects/($r.repo) branch -d $r.item } | complete)
                  emit $"branch -d ($r.item): exit ($bd.exit_code)"

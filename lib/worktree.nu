@@ -3,14 +3,19 @@
 # and the add-args decision. The scripts keep the effects (git calls, fs).
 export type PorcelainBlock = record<path: string, branch: string>
 
-# The repo's main line: master wins, then main, else "" (the fleet's order,
-# expressed as a predicate table — no dispatch chain).
+# The repo's main line: the FIRST candidate that exists, else "" (the
+# fleet's order lives in the caller's list — the sweep adds damian).
+export def pick-branch-of [candidates: list<string>, present: list<string>]: nothing -> string {
+    $candidates | where {|c| $c in $present } | get -o 0 | default ""
+}
+
+# wt's two-candidate form: master wins, then main, else "".
 export def pick-branch [has_master: bool, has_main: bool]: nothing -> string {
-    let rows: list<record<when: bool, answer: string>> = [
-        {when: $has_master, answer: "master"}
-        {when: $has_main, answer: "main"}
+    let rows: list<record<branch: string, has: bool>> = [
+        {branch: "master", has: $has_master}
+        {branch: "main", has: $has_main}
     ]
-    $rows | where when | get -o 0.answer | default ""
+    pick-branch-of ["master" "main"] ($rows | where has | get branch)
 }
 
 # The convention: ~/Projects/.worktrees/<repo>-<slug>.

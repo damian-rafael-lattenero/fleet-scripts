@@ -26,6 +26,7 @@ const TRUFFLEHOG: string = "/opt/homebrew/bin/trufflehog"
 const CONFIG: string = "/Users/lattenero/.config/gitleaks/gitleaks.toml"
 
 use /Users/lattenero/Projects/nushell-fp/mods/proc.nu *
+use lib/secret-scan.nu *
 
 def die [msg: string]: nothing -> nothing {
     print -e $"✗ ($msg)"
@@ -77,45 +78,19 @@ def scan-history [dir: string]: nothing -> nothing {
     if $r.exit_code != 0 {
         die $"trufflehog exit ($r.exit_code): (fold-stderr $r | str trim | str substring 0..300)"
     }
-    let rows: list<any> = ($r.stdout | lines | where {|l| ($l | str trim | is-not-empty) }
-        | each {|l| try { $l | from json } catch { null } } | where {|o| $o != null })
-    let verified: list<any> = ($rows | where {|o| ($o.Verified? | default false) == true })
+    # the JSON-lines parse and the Verified filter ride lib/secret-scan.nu
+    # (tested): 0.117's `from json` is lenient, so the record filter is what
+    # keeps a scanner's noise out of the rows.
+    let rows: list<any> = (json-rows $r.stdout)
+    let verified: list<any> = (verified-signals $rows)
     if ($verified | is-empty) {
-        let tail: string = (if ($rows | is-empty) {
-            "no signals"
-        } else {
-            $"($rows | length) unverified signals — fixtures or a local DSN, not actionable"
-        })
-        print $"✓ history holds no LIVE credentials: ($dir) — ($tail)"
+        print $"✓ history holds no LIVE credentials: ($dir) — (unverified-tail $rows)"
         return
     }
     for o in $verified {
         print -e $"· ($o.DetectorName) LIVE in ($o.SourceMetadata.Data.Git.file):($o.SourceMetadata.Data.Git.line)"
     }
     die $"history: ($verified | length) LIVE credential(s) in the history of ($dir) — INCIDENT"
-}
-
-def deep-allowed [f: string]: nothing -> bool {
-    let pats: list<string> = [
-        '(^|/)node_modules/'
-        '(^|/)\.gradle/'
-        '(^|/)\.kotlin/'
-        '(^|/)build/'
-        '(^|/)dist/'
-        '(^|/)out/'
-        '(^|/)\.worktrees/'
-        '(^|/)third-party/'
-        '(^|/)bundled-agents/'
-        '(^|/)test/'
-        '(^|/)tests/'
-        '\.test\.[tj]sx?$'
-        '\.spec\.[tj]sx?$'
-        '\.e2e\.[tj]s$'
-        'wdio\.conf\.ts$'
-        '(^|/)fixtures?/'
-        '(^|/)scripts/test-'
-    ]
-    ($pats | any {|p| $f =~ $p })
 }
 
 # THE DEEP PASS: gitleaks per commit over the NON-test/vendor files, so the
@@ -166,8 +141,6 @@ def main [repo: path, --staged, --history, --deep]: nothing -> nothing {
         return
     }
     let findings: list<any> = (try { $r.stdout | from json } catch { [] })
-    for f in $findings {
-        print -e $"· ($f.RuleID) en ($f.File):($f.StartLine)"
-    }
+    for line in (finding-lines $findings) { print -e $line }
     die $"tree: ($findings | length) findings in ($dir) — values redacted"
 }
