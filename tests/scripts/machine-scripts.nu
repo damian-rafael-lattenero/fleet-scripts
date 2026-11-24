@@ -3,6 +3,7 @@
 # skill scripts (the phone's drills). They are machine state, so their tests
 # live here — parse + shebang resolves + no stale pre-hub import.
 # covers: /Users/lattenero/.zcode/hooks/*.nu
+# covers: /Users/lattenero/Scripts/scripts/hooks/*.nu
 # covers: /Users/lattenero/.agents/skills/*/scripts/*.nu
 use std/assert
 use ../../lib/structural.nu *
