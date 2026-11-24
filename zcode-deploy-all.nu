@@ -46,6 +46,15 @@
 #   zcode-deploy-all              # the real wave (owner's call, from Ghostty)
 
 const NU: string = "/Users/lattenero/.local/bin/nu-nightly"
+const LOGDIR: string = "/tmp/deploy-all"
+const LOG_FILE: string = "/Users/lattenero/Library/Logs/zcode-deploy-all.log"
+use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+
+# One voice for stdout AND the run log — the wave's own receipt must survive
+# the terminal that launched it (the fleet family's contract).
+def emit [line: string]: nothing -> nothing {
+    emit-to $LOG_FILE $line
+}
 
 # The type aliases (nu 0.117 `type` keyword — discovered 21/11 from the
 # parser's own error message). The shape reads once and every signature
@@ -56,7 +65,6 @@ type DeployLeg = record<name: string, label: string, script: string, args: list<
 type DeployWave = list<DeployLeg>
 type LegVerdict = record<leg: string, ok: bool, code: int, secs: int, log: string, tail: list<string>>
 type LegVerdicts = list<LegVerdict>
-const LOGDIR: string = "/tmp/deploy-all"
 # kind = the RESOURCE the leg competes for (the scheduling policy is data,
 # not flow — measured 23/11: 3 gradle builds + pnpm at once pushed load to
 # 28 and the bot's 45s verification failed once). The pnpm track runs
@@ -97,6 +105,8 @@ def leg-body [leg: DeployLeg, logdir: path, nu_bin: string]: nothing -> string {
         'tee -a' (sh-quote $log)
         '|'
         'awk' '-v' (sh-quote $"p=($prefix)") (sh-quote $awk)
+        '|'
+        'tee -a' (sh-quote $LOG_FILE)
         ')'
         '2>&1'
         '< /dev/null;'
@@ -113,11 +123,27 @@ def leg-body [leg: DeployLeg, logdir: path, nu_bin: string]: nothing -> string {
 # the saturation timeouts without giving up the fork's parallelism). The
 # cost = MAX(fork, sum(gradle)) with zero verification races.
 def wave-body [legs: DeployWave, logdir: path, nu_bin: string]: nothing -> string {
+    # Totality: `kind` is data, so a typo'd kind would fall through both
+    # tracks and the leg would never run — the plan says 4, the wave runs 3.
+    let unknown: list<string> = ($legs | where {|l| $l.kind not-in ["pnpm" "gradle"]} | get name)
+    if not ($unknown | is-empty) {
+        error make {msg: $"unknown leg kind — not scheduled by any track: ($unknown | str join ', ')"}
+    }
     let solo: list<string> = ($legs | where kind == "pnpm" | each {|leg| (leg-body $leg $logdir $nu_bin) + ' &' })
     let gradle: list<string> = ($legs | where kind == "gradle" | each {|leg| leg-body $leg $logdir $nu_bin })
     let parts: list<string> = ($solo
         | append (if ($gradle | is-empty) { [] } else { ['(' ] ++ $gradle ++ [') &'] }))
     $parts | flatten | str join (char nl)
+}
+
+# The status file as a typed verdict — the format is OURS, so one named
+# parse; a missing or malformed file means the leg never finished (code -1,
+# the same sentinel the caller already speaks).
+def read-status [path: string]: nothing -> record<code: int, secs: int> {
+    if not ($path | path exists) { return {code: -1, secs: 0} }
+    let hit: list<record> = (open --raw $path | parse -r '^\s*(?<code>-?\d+)\s+(?<secs>\d+)\s*$')
+    if ($hit | is-empty) { return {code: -1, secs: 0} }
+    {code: ($hit.0.code | into int), secs: ($hit.0.secs | into int)}
 }
 
 # The wave. Prints every leg live; returns one verdict per leg in plan order.
@@ -135,40 +161,37 @@ export def wave [legs: DeployWave, logdir: path, nu_bin: string]: nothing -> lis
     ^/bin/bash -c ($body + (char nl) + 'wait' + (char nl) + 'exit 0' + (char nl))
     $legs | each {|leg|
         let log: string = (($logdir | path join $"($leg.name).log") | into string)
-        let status: string = (($logdir | path join $"($leg.name).status") | into string)
-        let verdict: list<string> = (if ($status | path exists) { (open --raw $status | str trim | split row ' ') } else { [] })
-        let code: int = (if ($verdict | is-empty) { -1 } else { $verdict.0 | into int })
-        let secs: int = (if ($verdict | length) > 1 { $verdict.1 | into int } else { 0 })
+        let v: record<code: int, secs: int> = (read-status (($logdir | path join $"($leg.name).status") | into string))
         let tail: list<string> = (if ($log | path exists) { (open --raw $log | lines | last 10) } else { [] })
-        {leg: $leg.name, ok: ($code == 0), code: $code, secs: $secs, log: $log, tail: $tail}
+        {leg: $leg.name, ok: ($v.code == 0), code: $v.code, secs: $v.secs, log: $log, tail: $tail}
     }
 }
 
 def main [--dry-run]: nothing -> nothing {
     if $dry_run {
-        print $"🧪 (ansi cyan)dry-run — the wave plan, nothing runs(ansi reset):"
+        emit $"🧪 dry-run — the wave plan, nothing runs:"
         for leg in $LEGS {
             let args: string = ($leg.args | str join ' ')
-            print $"  ($leg.kind | fill -a left -w 7)($leg.name | fill -a left -w 9)($leg.label)"
-            print $"            ($NU) ($leg.script) ($args)"
+            emit $"  ($leg.kind | fill -a left -w 7)($leg.name | fill -a left -w 9)($leg.label)"
+            emit $"            ($NU) ($leg.script) ($args)"
         }
-        print $"  tracks: pnpm runs ALONE — gradle chains inside one track, the journal lock serializes them"
+        emit $"  tracks: pnpm runs ALONE — gradle chains inside one track, the journal lock serializes them"
         return
     }
-    print $"🚀 (ansi cyan)the parallel wave — 4 legs, live output(ansi reset) \(fork + brain + bot + whatsapp; the cost is the MAX, not the sum\)"
-    print $"   logs: ($LOGDIR)/<leg>.log — every line below is prefixed with its leg"
+    emit $"🚀 the parallel wave — 4 legs, live output \(fork + brain + bot + whatsapp; the cost is the MAX, not the sum\)"
+    emit $"   logs: ($LOGDIR)/<leg>.log — every line below is prefixed with its leg; the run log is ($LOG_FILE)"
     let t0: datetime = (date now)
     let wave: LegVerdicts = (wave $LEGS $LOGDIR $NU)
     let total: string = ((date now) - $t0 | into string)
-    print $"── wave finished in ($total) ──"
-    let failed: list<record> = ($wave | where {|w| not $w.ok})
+    emit $"── wave finished in ($total) ──"
+    let failed: list<LegVerdict> = ($wave | where {|w| not $w.ok})
     for w in $wave {
         let verdict: string = (if $w.ok { "✅" } else { $"❌ exit ($w.code)" })
-        print $"($verdict) ($w.leg | fill -a left -w 9)($w.secs)s — log: ($w.log)"
-        if not $w.ok { $w.tail | each {|l| print $"    ($l)"} }
+        emit $"($verdict) ($w.leg | fill -a left -w 9)($w.secs)s — log: ($w.log)"
+        if not $w.ok { $w.tail | each {|l| emit $"    ($l)"} }
     }
     if not ($failed | is-empty) {
         error make {msg: $"🛑 the wave ended with ($failed | length) failed leg\(s\): ($failed | get leg | str join ', ') — logs in ($LOGDIR)"}
     }
-    print "📄 Verify: /status (phone, channel UP), /brain (fork), the brain's health-check. ONE deploy per change."
+    emit "📄 Verify: /status (phone, channel UP), /brain (fork), the brain's health-check. ONE deploy per change."
 }
