@@ -10,14 +10,12 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/day.log"
 const BRAIN: string = "/Users/lattenero/Projects/agent-brain/core/build/install/agent-brain/bin/agent-brain"
 const SCRIPTS: string = "/Users/lattenero/Scripts"
 
-# The type aliases (the owner's 22/11 law): the shapes read once, the
-# signatures spell the name.
-type RepoBrief = record<repo: string, n: int, last: string>
-type MemoryBrief = record<kind: string, learned: string>
+# The brief shapes and their projections ride lib/day.nu (tested).
 
 $env.config.table.mode = "thin"
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use lib/day.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
@@ -42,10 +40,7 @@ def commits-section [hours: int]: nothing -> nothing {
         if $out.exit_code != 0 { [] } else {
             # git colorizes even piped on this machine — ansi strip BEFORE
             # parsing (the anti-patterns law #18, measured on worktree-sweep).
-            let lines: list<string> = ($out.stdout | ansi strip | lines | where {|l| ($l | str trim) != "" })
-            if ($lines | is-empty) { [] } else {
-                {repo: ($repo | path basename), n: ($lines | length), last: ($lines | first | str substring 0..59)}
-            }
+            repo-briefs $repo ($out.stdout | ansi strip | lines)
         }
     } | flatten)
     if ($rows | is-empty) {
@@ -65,11 +60,10 @@ def memories-section [hours: int]: nothing -> nothing {
         emit "brain degraded: memory recent unavailable"
         return
     }
-    let all: list<record> = ($out.stdout | from json
-        | where {|m| ((try { $m.createdAt | into datetime } catch { null }) | default (0 | into datetime)) > $cutoff })
-    let rows: list<MemoryBrief> = ($all | each {|m| {kind: $m.kind, learned: ($m.content | str substring 0..89)} }
-        # newest first (the CLI's own order), and a BRIEF — cap the display, count everything.
-        | first 10)
+    let all: list<any> = (in-window ($out.stdout | from json) $cutoff)
+    # newest first (the CLI's own order), and a BRIEF — cap the display,
+    # count everything (lib/day.nu).
+    let rows: list<MemoryBrief> = (memory-briefs $all)
     if ($rows | is-empty) {
         emit "the brain learned nothing new in the window"
     } else {
