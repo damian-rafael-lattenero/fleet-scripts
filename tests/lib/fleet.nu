@@ -38,4 +38,43 @@ assert equal ((resolve "deploy-bot" $t) | get 0.script) "/hub/scripts/zcode-bot-
 assert equal ((resolve "brain" $t) | get 0.script) "/hub/scripts/brain.nu"
 assert equal (resolve "nope" $t) []
 
+# 5. arguments-of: the SIGNATURE is the source. A multi-line signature with
+#    flags, a defaulted flag, an optional positional and a rest parameter is
+#    rendered compactly; the inline comments inside it never leak. The params
+#    are newline-separated on purpose — the house style, and what the real
+#    scripts (brain.nu, ram-clean.nu) do.
+let src: string = ([
+    '#!/usr/bin/env nu'
+    '# thing.nu — a thing that does the thing with the stuff and more words here'
+    '# and the paragraph continues on this line.'
+    'def main ['
+    '    repo?: path                # where the thing lives (never checked)'
+    '    --k: int = 5               # how many'
+    '    --fix                     # bool flag, no type'
+    '    ...extra: string'
+    ']: nothing -> nothing {'
+    '    print 1'
+    '}'
+] | str join (char nl))
+assert equal (arguments-of $src) '[repo] <path> · --k <int> · --fix · ...extra <string>'
+assert equal (description-of $src) 'a thing that does the thing with the stuff and more words here and the paragraph continues on this line.'
+assert equal (arguments-of 'def main []: nothing -> nothing { }') '-'
+assert equal (arguments-of 'print 1') '-'
+
+# 6. split-params: a comma inside a record type never splits; the newline is a
+#    separator too (that is how the house writes signatures).
+assert equal (split-params 'a: int, b: record<x: int, y: int>, c: string') ['a: int' 'b: record<x: int, y: int>' 'c: string']
+assert equal (split-params 'a: int, b: int') ['a: int' 'b: int']
+
+# 7. render-param: each shape has one label, and a typed value carries <type>.
+assert equal (render-param 'question?: string') '[question] <string>'
+assert equal (render-param 'repo: path') '"repo" <path>'
+assert equal (render-param '--k: int = 5') '--k <int>'
+assert equal (render-param '--fix') '--fix'
+assert equal (render-param '...scopes: string') '...scopes <string>'
+
+# 8. clip: short text is untouched, long text breaks at a word and says so.
+assert equal (clip 'short' 10) 'short'
+assert equal (clip 'one two three four five six' 12) 'one two…'
+
 print "lib/fleet ok"

@@ -37,14 +37,23 @@ def verb-rows []: nothing -> list<Command> {
     verb-table (aliases $hub (healthcheck-script)) (verbs $files)
 }
 
+# The listing is GENERATED from each script's own file (signature + header
+# paragraph), so it can never drift from what the verb actually takes.
+def listing [rows: list<Command>]: nothing -> table<verb: string, arguments: string, description: string> {
+    $rows | each {|c|
+        let src: string = (open --raw $c.script)
+        {verb: $c.verb, arguments: (arguments-of $src), description: (description-of $src)}
+    }
+}
+
 def usage [rows: list<Command>]: nothing -> nothing {
     print 'fleet — the single door to ~/Scripts/scripts'
     print ''
     print 'usage: fleet <verb> [args...]'
-    print '       fleet list   every verb and the script behind it'
+    print '       fleet list   every verb, what it takes and what it does'
     print '       fleet help   this text'
     print ''
-    $rows | each {|c| {verb: $c.verb, script: ($c.script | path basename)}} | print
+    listing $rows | table --index false | print
 }
 
 def unknown [verb: string, rows: list<Command>]: nothing -> nothing {

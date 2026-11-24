@@ -15,10 +15,15 @@ let HC: string = ($nu.home-dir | path join '.agents/skills/fleet-healthcheck/scr
 assert equal ($FLEET | path type) "symlink" $"($FLEET) must be a symlink"
 assert equal (((^readlink $FLEET | str trim) | path expand)) ($HUB | path join 'scripts' 'fleet.nu') "the link must point at the hub"
 
-# 2. every advertised verb answers a file on disk — the table cannot lie.
+# 2. every advertised verb answers a file on disk — the table cannot lie — and
+#    every script documents itself: `fleet list`'s description column is the
+#    script's own header paragraph, so a headerless script is a blank row.
 let rows: list<Command> = (verb-table (aliases $HUB $HC) (verbs (glob ($HUB | path join 'scripts' '*.nu'))))
 for r in $rows {
     assert equal ($r.script | path exists) true $"verb ($r.verb): missing script — ($r.script)"
+    let src: string = (open --raw $r.script)
+    assert ((description-of $src) != '-') $"verb ($r.verb): no header paragraph to describe it"
+    assert ((arguments-of $src) != '') $"verb ($r.verb): empty arguments cell"
 }
 
 # 3. the two exit codes the callers depend on: list is 0, an unknown verb is 2
