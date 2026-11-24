@@ -13,6 +13,8 @@
 # `wt-done <slug>` is the audit-then-clean mirror (merged + clean or it
 # refuses). Read-only when listing; the only mutation is the worktree add.
 
+use lib/worktree.nu *
+
 # Every direct ~/Projects/* git repo (the day.nu enumeration law) plus the
 # ~/Scripts hub itself.
 def fleet-repos []: nothing -> list<string> {
@@ -25,26 +27,17 @@ def fleet-repos []: nothing -> list<string> {
 
 # The repo's main line: master, else main, else "" (worktree-sweep's law).
 def main-branch [repo: string]: nothing -> string {
-    for b in ["master" "main"] {
-        if ((do { ^git -C $repo rev-parse --verify $b } | complete).exit_code == 0) { return $b }
-    }
-    ""
+    let has_master: bool = ((do { ^git -C $repo rev-parse --verify master } | complete).exit_code == 0)
+    let has_main: bool = ((do { ^git -C $repo rev-parse --verify main } | complete).exit_code == 0)
+    pick-branch $has_master $has_main
 }
 
 def list-all []: nothing -> nothing {
     for repo in (fleet-repos) {
         let out: record = (do { ^git -C $repo worktree list --porcelain } | complete)
         if $out.exit_code != 0 { continue }
-        let rows: list<string> = ($out.stdout
-            | str trim
-            | split row "\n\n"
-            | skip 1
-            | each {|block|
-                let lines: list<string> = ($block | lines)
-                let path: string = ($lines | where {|l| $l =~ '^worktree ' } | get -o 0 | default "" | str replace 'worktree ' '')
-                let branch: string = (($lines | where {|l| $l =~ '^branch ' } | get -o 0 | default "") | str replace 'branch refs/heads/' '')
-                $"  ($branch) ← ($path)"
-            })
+        let rows: list<string> = (linked-blocks $out.stdout
+            | each {|b| $"  ($b.branch) ← ($b.path)" })
         if not ($rows | is-empty) {
             print $"($repo | path basename):"
             $rows | each {|r| print $r }
@@ -54,7 +47,7 @@ def list-all []: nothing -> nothing {
 
 def create [slug: string, repo_dir: string]: nothing -> nothing {
     let name: string = ($repo_dir | path basename)
-    let path: string = ("/Users/lattenero/Projects/.worktrees" | path join $"($name)-($slug)")
+    let path: string = (worktree-path $name $slug)
     if ($path | path exists) {
         print $"worktree already exists: ($path) — cd there and work"
         return
@@ -63,11 +56,7 @@ def create [slug: string, repo_dir: string]: nothing -> nothing {
     if ($base | is-empty) { print $"✗ ($repo_dir) has no master/main to base on"; exit 1 }
     let ref: string = $"agent/($slug)"
     let existing: bool = ((do { ^git -C $repo_dir rev-parse --verify $ref } | complete).exit_code == 0)
-    let args: list<string> = (if $existing {
-        ["worktree" "add" $path $ref]
-    } else {
-        ["worktree" "add" "-b" $ref $path $base]
-    })
+    let args: list<string> = (add-args $path $ref $base $existing)
     let out: record = (do { ^git -C $repo_dir ...$args } | complete)
     if $out.exit_code != 0 {
         print -e $"✗ worktree add failed: ($out.stderr | str trim | str substring 0..200)"

@@ -7,12 +7,13 @@
 
 const WORKTREES: string = "/Users/lattenero/Projects/.worktrees"
 
+use lib/worktree.nu *
+
 # The repo's main line: master, else main, else "" (worktree-sweep's law).
 def main-branch [repo: string]: nothing -> string {
-    for b in ["master" "main"] {
-        if ((do { ^git -C $repo rev-parse --verify $b } | complete).exit_code == 0) { return $b }
-    }
-    ""
+    let has_master: bool = ((do { ^git -C $repo rev-parse --verify master } | complete).exit_code == 0)
+    let has_main: bool = ((do { ^git -C $repo rev-parse --verify main } | complete).exit_code == 0)
+    pick-branch $has_master $has_main
 }
 
 def main [
@@ -35,14 +36,7 @@ def main [
     let path: string = ($candidates | first)
     let wtOut: record = (do { ^git -C $path worktree list --porcelain } | complete)
     if $wtOut.exit_code != 0 { print -e $"✗ not a git worktree: ($path)"; exit 1 }
-    let lines: list<string> = ($wtOut.stdout
-        | str trim
-        | split row "\n\n"
-        | skip 1
-        | each {|block|
-            ($block | lines | where {|l| $l =~ '^branch ' } | get -o 0 | default "" | str replace 'branch refs/heads/' '')
-        })
-    let branch: string = ($lines | first | default "")
+    let branch: string = (linked-blocks $wtOut.stdout | get -o 0 | default {branch: ""} | get branch)
     # the MAIN repo, not the worktree: show-toplevel from inside a worktree
     # answers the worktree itself — the common dir's parent is the real one
     let common: string = (do { ^git -C $path rev-parse --git-common-dir } | complete | get stdout | str trim)
@@ -63,7 +57,7 @@ def main [
     # together with the `*` current-branch marker, or the gate refuses a
     # merged branch forever)
     let merged: list<string> = ((do { ^git -C $repo branch --merged $main } | complete).stdout | ansi strip | lines
-        | each {|l| $l | str trim | str replace -r '^[\*\+\s]+' '' }
+        | each {|l| strip-branch-markers $l }
         | where {|l| $l | is-not-empty })
     if not ($branch in $merged) {
         print $"✗ ($branch) is not merged into ($main) — merge it first; wt-done refuses forever"
