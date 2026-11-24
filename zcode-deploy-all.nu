@@ -56,15 +56,10 @@ def emit [line: string]: nothing -> nothing {
     emit-to $LOG_FILE $line
 }
 
-# The type aliases (nu 0.117 `type` keyword — discovered 21/11 from the
-# parser's own error message). The shape reads once and every signature
-# spells it — the no-opaque-types law satisfied by the language itself.
-# The union alias ("pnpm" | "gradle") does NOT parse yet (measured) — the
-# LEGS rows carry the kind discipline.
-type DeployLeg = record<name: string, label: string, script: string, args: list<string>, kind: string>
-type DeployWave = list<DeployLeg>
-type LegVerdict = record<leg: string, ok: bool, code: int, secs: int, log: string, tail: list<string>>
-type LegVerdicts = list<LegVerdict>
+# The shapes, the quote, the leg body, the wave plan and the status parse
+# ride lib/zcode-deploy-all.nu (tested). The union alias ("pnpm" | "gradle")
+# does NOT parse yet (measured) — the LEGS rows carry the kind discipline.
+use lib/zcode-deploy-all.nu *
 # kind = the RESOURCE the leg competes for (the scheduling policy is data,
 # not flow — measured 23/11: 3 gradle builds + pnpm at once pushed load to
 # 28 and the bot's 45s verification failed once). The pnpm track runs
@@ -78,72 +73,12 @@ const LEGS: list<DeployLeg> = [
     {name: "whatsapp", label: "Bot Kotlin WhatsApp (build → install → relaunch)", script: "/Users/lattenero/Projects/whatsdigest-kt/scripts/deploy-daemon.nu", args: [], kind: "gradle"}
 ]
 
-# POSIX single-quote so a path/arg can never split or interpolate in the sh.
-def sh-quote [s: string]: nothing -> string {
-    "'" + ($s | str replace -a "'" "'\\''") + "'"
-}
-
-# One bash group per leg: the leg's stream goes to its log (raw) AND to this
-# script's stdout (prefixed). `< /dev/null` is the SIGTTIN cure: a subshell is
-# a background process group on the session TTY, and gradle's terminal probe
-# (Jansi ioctl) would freeze the leg "Stopped" on a read (measured 15/11).
-# NO trailing `&` — the caller owns the scheduling (solo legs get `&`, the
-# gradle legs chain inside one track group).
-def leg-body [leg: DeployLeg, logdir: path, nu_bin: string]: nothing -> string {
-    let log: string = (($logdir | path join $"($leg.name).log") | into string)
-    let status: string = (($logdir | path join $"($leg.name).status") | into string)
-    let prefix: string = $"[($leg.name)] "
-    let awk: string = '{printf "%s%s\n", p, $0; fflush()}'
-    let args: string = ($leg.args | each {|a| sh-quote $a} | str join ' ')
-    let parts: list<string> = [
-        '('
-        't0=$(date +%s);'
-        (sh-quote $nu_bin)
-        (sh-quote $leg.script)
-        $args
-        '> >('
-        'tee -a' (sh-quote $log)
-        '|'
-        'awk' '-v' (sh-quote $"p=($prefix)") (sh-quote $awk)
-        '|'
-        'tee -a' (sh-quote $LOG_FILE)
-        ')'
-        '2>&1'
-        '< /dev/null;'
-        'code=$?; t1=$(date +%s);'
-        'printf "%s %s\n" "$code" "$((t1-t0))" >' (sh-quote $status)
-        ')'
-    ]
-    $parts | str join ' '
-}
-
-# The scheduling policy as data: the pnpm legs run each in their own
-# background group; the gradle legs CHAIN inside ONE background group (the
-# journal lock serialized them anyway — the chain removes the contention and
-# the saturation timeouts without giving up the fork's parallelism). The
-# cost = MAX(fork, sum(gradle)) with zero verification races.
-def wave-body [legs: DeployWave, logdir: path, nu_bin: string]: nothing -> string {
-    # Totality: `kind` is data, so a typo'd kind would fall through both
-    # tracks and the leg would never run — the plan says 4, the wave runs 3.
-    let unknown: list<string> = ($legs | where {|l| $l.kind not-in ["pnpm" "gradle"]} | get name)
-    if not ($unknown | is-empty) {
-        error make {msg: $"unknown leg kind — not scheduled by any track: ($unknown | str join ', ')"}
-    }
-    let solo: list<string> = ($legs | where kind == "pnpm" | each {|leg| (leg-body $leg $logdir $nu_bin) + ' &' })
-    let gradle: list<string> = ($legs | where kind == "gradle" | each {|leg| leg-body $leg $logdir $nu_bin })
-    let parts: list<string> = ($solo
-        | append (if ($gradle | is-empty) { [] } else { ['(' ] ++ $gradle ++ [') &'] }))
-    $parts | flatten | str join (char nl)
-}
-
 # The status file as a typed verdict — the format is OURS, so one named
-# parse; a missing or malformed file means the leg never finished (code -1,
-# the same sentinel the caller already speaks).
+# parse (lib/status-parse); a missing or malformed file means the leg never
+# finished (code -1, the same sentinel the caller already speaks).
 def read-status [path: string]: nothing -> record<code: int, secs: int> {
     if not ($path | path exists) { return {code: -1, secs: 0} }
-    let hit: list<record> = (open --raw $path | parse -r '^\s*(?<code>-?\d+)\s+(?<secs>\d+)\s*$')
-    if ($hit | is-empty) { return {code: -1, secs: 0} }
-    {code: ($hit.0.code | into int), secs: ($hit.0.secs | into int)}
+    status-parse (open --raw $path)
 }
 
 # The wave. Prints every leg live; returns one verdict per leg in plan order.
@@ -154,7 +89,7 @@ export def wave [legs: DeployWave, logdir: path, nu_bin: string]: nothing -> lis
         (($logdir | path join $"($leg.name).log") | into string)
     ] } | flatten)
     ^/bin/rm -f ...$stale
-    let body: string = (wave-body $legs $logdir $nu_bin)
+    let body: string = (wave-body $legs $logdir $nu_bin $LOG_FILE)
     # `wait` is the rendezvous (no polling): it returns when every track is
     # done. `exit 0` keeps nu from raising on the last job's status — the
     # verdicts are the status files, not this shell's exit code.
