@@ -1,0 +1,3 @@
+# The bridge for the DEPLOYED bot build: its /ram_clean pins the pre-hub
+# flat path. Delete this line (and the symlink) after the next bot deploy.
+/ram-clean.nu
