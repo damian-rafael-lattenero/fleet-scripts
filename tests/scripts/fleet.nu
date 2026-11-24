@@ -35,7 +35,21 @@ let bad: record<exit_code: int, stdout: string, stderr: string> = (do { ^$FLEET 
 assert equal $bad.exit_code 2 "fleet <unknown> must exit 2"
 assert ($bad.stderr =~ 'unknown verb') "the refusal must name the verb"
 
-# 4. config.nu's side: the one alias exists and no per-script wrapper survived
+# 4. --json is the machine leg (the phone's discovery): the same rows, with the
+#    script path the daemon spawns and nothing else. A consumer that cannot see
+#    a verb cannot offer it, so the shape is pinned here.
+let out: record<exit_code: int, stdout: string, stderr: string> = (do { ^$FLEET list --json } | complete)
+assert equal $out.exit_code 0 "fleet list --json must exit 0"
+let machine: list<record> = ($out.stdout | from json)
+assert equal (($machine | length)) ($rows | length) "the json must carry every verb"
+assert equal (($machine | get name | sort)) ($rows | get verb | sort)
+for r in $machine {
+    assert (($r.script | path exists)) $"json row ($r.name): script missing"
+    assert (($r.kind in ['script' 'alias'])) $"json row ($r.name): kind must be script|alias"
+    assert (($r.description | is-not-empty)) $"json row ($r.name): description is the phone's only doc"
+}
+
+# 5. config.nu's side: the one alias exists and no per-script wrapper survived
 #    (the 24/11 consolidation: 17 entries died, 1 was born).
 let cfg: string = (open --raw ($nu.default-config-dir | path join 'config.nu'))
 assert ($cfg =~ 'alias fleet = \^/') "config.nu must alias fleet"

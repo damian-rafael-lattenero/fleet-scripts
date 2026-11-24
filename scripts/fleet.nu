@@ -58,10 +58,26 @@ def usage [rows: list<Command>]: nothing -> nothing {
     print 'fleet — the single door to ~/Scripts/scripts'
     print ''
     print 'usage: fleet <verb> [args...]'
-    print '       fleet list   every verb, what it takes and what it does'
-    print '       fleet help   this text'
+    print '       fleet list [--json]   every verb, what it takes and what it does'
+    print '       fleet help            this text'
     print ''
     listing $rows | table | print
+}
+
+# The SAME rows, machine-readable — the phone's discovery leg (the Telegram
+# mirror reads this to learn what exists, and runs the `script` it names, so
+# the hub stays the only place that knows the table).
+def listing-json [rows: list<Command>]: nothing -> list<record> {
+    $rows | each {|c|
+        let src: string = (open --raw $c.script)
+        {
+            name: $c.verb
+            kind: $c.kind
+            script: $c.script
+            arguments: (arguments-of $src)
+            description: (description-of $src)
+        }
+    } | sort-by name
 }
 
 def unknown [verb: string, rows: list<Command>]: nothing -> nothing {
@@ -75,7 +91,11 @@ def --wrapped main [...args: string]: nothing -> nothing {
     let verb: string = (if ($args | is-empty) { 'list' } else { $args | first })
     let rest: list<string> = ($args | skip 1)
     if $verb in ['list' 'help' '--help' '-h'] {
-        usage $rows
+        if ('--json' in $rest) {
+            print (listing-json $rows | to json)
+        } else {
+            usage $rows
+        }
         return
     }
     let hits: list<Command> = (resolve $verb $rows)
