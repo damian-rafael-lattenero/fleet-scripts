@@ -38,11 +38,18 @@ def verb-rows []: nothing -> list<Command> {
 }
 
 # The listing is GENERATED from each script's own file (signature + header
-# paragraph), so it can never drift from what the verb actually takes.
-def listing [rows: list<Command>]: nothing -> table<verb: string, arguments: string, description: string> {
+# paragraph), so it can never drift from what the verb actually takes. The
+# four columns mirror `my-commands`: the verb, the file behind it, what it
+# takes, what it does.
+def listing [rows: list<Command>]: nothing -> table<verb: string, script: string, arguments: string, description: string> {
     $rows | each {|c|
         let src: string = (open --raw $c.script)
-        {verb: $c.verb, arguments: (arguments-of $src), description: (description-of $src)}
+        {
+            verb: $c.verb
+            script: ($c.script | path basename)
+            arguments: (arguments-of $src)
+            description: (description-of $src)
+        }
     }
 }
 
