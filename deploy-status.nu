@@ -13,8 +13,6 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/deploy-status.log"
 # signatures spell the name.
 type DeployJob = record<job: string, label: string, log: string>
 type JobStatus = record<job: string, state: string, pid: int, written: string, marker: string, last: string>
-type StateRow = record<state: string, when: closure>
-type MarkerRow = record<marker: string, when: closure>
 
 # Nested script nu does NOT load config.nu — the owner's thin theme rides
 # the script itself (measured 21/11).
@@ -28,6 +26,8 @@ const JOBS: list<DeployJob> = [
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
 use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+use lib/log-scan.nu *
+use lib/deploy-status.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
@@ -46,44 +46,27 @@ def log-tail [log: string, n: int]: nothing -> list<string> {
 
 def scan [uid: string, j: DeployJob]: nothing -> JobStatus {
     let probe: record = (do { ^launchctl print $"gui/($uid)/($j.label)" } | complete)
-    let running: bool = (($probe.exit_code == 0) and ($probe.stdout | lines | any {|l| $l =~ "state = running"}))
-    # the 3-way state classifier as a predicate table — precedence lives in
-    # row order, the catch-all row LAST (the mode-table law; the branch
-    # chain dies).
-    let stateRows: list<StateRow> = [
-        {state: "not loaded", when: {|p: record| $p.exit_code != 0}}
-        {state: "RUNNING", when: {|p| $running}}
-        {state: "idle", when: {|p| true}}
-    ]
-    mut state: string = ($stateRows | where {|r| do $r.when $probe } | first | get state)
+    let probe_ok: bool = ($probe.exit_code == 0)
+    let running: bool = ($probe_ok and ($probe.stdout | lines | any {|l| $l =~ "state = running"}))
+    # the 3-way classifiers ride lib/deploy-status.nu (predicate tables,
+    # tested); the script keeps the launchctl/ps/tail effects.
+    mut state: string = (state-of $probe_ok $running)
     mut pid: int = 0
     if $running {
-        let pidRows: list<string> = ($probe.stdout | lines | where {|l| ($l | str trim) =~ '^pid = \d+' })
-        if ($pidRows | is-not-empty) {
-            $pid = ($pidRows | get 0 | str trim | str replace -r 'pid = ' '' | into int)
+        $pid = (pid-of $probe.stdout)
+        if $pid > 0 {
             let c1: float = (cpu-of $pid)
             sleep 2sec
             let c2: float = (cpu-of $pid)
-            let breathe: bool = (($c1 + $c2) > 5.0)
-            $state = (if $breathe { $"RUNNING alive cpu ($c1)/($c2)%" } else { $"STUCK SUSPECT cpu ($c1)/($c2)%" })
+            $state = (cpu-verdict $c1 $c2)
         }
     }
     let full: list<string> = (log-tail $j.log 60)
     # only the CURRENT run speaks: everything after the last build start —
     # an older run's ✗ must not convict a newer success (measured brain).
-    let starts: list<int> = ($full | enumerate | where {|it| $it.item =~ '==>' } | get index)
-    let tail: list<string> = (if ($starts | is-empty) { $full } else { $full | skip ($starts | last) })
-    # Hard-wrap unbreakable tokens (the HikariPool class line lives here
-    # too) — the shared mod does the chunking.
-    let last: string = (if ($tail | is-empty) { "no log" } else { hard-wrap ($tail | last) 35 })
-    # the end-marker classifier as a predicate table — ✗ convicts first,
-    # then done, then the honest unknown (precedence in row order).
-    let markerRows: list<MarkerRow> = [
-        {marker: "last run FAILED", when: {|ls: list<string>| $ls | any {|l| $l =~ '✗|BUILD FAILED' }}}
-        {marker: "last run done", when: {|ls: list<string>| $ls | any {|l| $l =~ '\bdone\b' }}}
-        {marker: "running or unknown end", when: {|ls| true}}
-    ]
-    let marker: string = ($markerRows | where {|r| do $r.when $tail } | first | get marker)
+    let tail: list<string> = (current-run $full '==>')
+    let last: string = (last-line $tail)
+    let marker: string = (marker-of $tail)
     if ($j.log | path exists) {
         let age: duration = ((date now) - (ls $j.log | get 0.modified))
         {job: $j.job, state: $state, pid: $pid, written: $"($age) ago", marker: $marker, last: $last}

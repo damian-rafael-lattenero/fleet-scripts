@@ -7,9 +7,8 @@
 # line to find — that is deploy liveness territory, not log triage.
 
 # The type aliases (the owner's 22/11 law): the shapes read once, the
-# signatures spell the name.
+# signatures spell the name. LogScan rides lib/fleet-errors.nu (tested).
 type LogTarget = record<name: string, path: string>
-type LogScan = record<log: string, errors: int, fresh: int, last: string>
 
 const LOGS: list<LogTarget> = [
     {name: "bot out", path: "/Users/lattenero/.zcode/bot-kotlin/logs/launchd.out.log"}
@@ -37,15 +36,13 @@ $env.config.table.mode = "thin"
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
 use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+use lib/log-scan.nu *
+use lib/fleet-errors.nu *
 
 # One voice for stdout AND the run log (the fleet family contract) — the
 # shared mod does the work.
 def emit [line: string]: nothing -> nothing {
     emit-to $LOG_FILE $line
-}
-
-def trim100 [s: string]: nothing -> string {
-    if ($s | str length) > 100 { $s | str substring 0..99 } else { $s }
 }
 
 def scan-log [entry: LogTarget, tailN: int, cutoff: datetime]: nothing -> LogScan {
@@ -55,26 +52,17 @@ def scan-log [entry: LogTarget, tailN: int, cutoff: datetime]: nothing -> LogSca
     }
     let all: list<string> = ($out.stdout | ansi strip | lines)
     # deploy logs carry older runs in the same file: only the CURRENT run
-    # speaks — an older run's ✗ must not be presented as the last error
-    # (measured 21/11: deploy-brain showed a stale ✗ after a clean run).
+    # speaks (lib/log-scan.nu) — an older run's ✗ must not be presented as
+    # the last error (measured 21/11: deploy-brain showed a stale ✗ after a
+    # clean run).
     let lines: list<string> = (if ($entry.name | str starts-with "deploy") {
-        let starts: list<int> = ($all | enumerate | where {|it| $it.item =~ '==>|^\[deploy\]' } | get index)
-        if ($starts | is-empty) { $all } else { $all | skip ($starts | last) }
+        current-run $all '==>|^\[deploy\]'
     } else {
         $all
     })
-    # Level tokens + failure markers, never bare words: "error"/"failed"
-    # inside English prose (reconcile sentences, live-card pings naming a
-    # file) are not errors — measured false positives 21/11.
-    let errors: list<string> = ($lines | where {|l| $l =~ '\sERROR\s|Exception|BUILD FAILED|(?i)fatal|✗'})
-    let fresh: int = ($errors | where {|l|
-        let stamp: any = (try { ($l | split row " " | get 0) | into datetime } catch { null })
-        # date-less log stamps (brain log) parse as TODAY at that time — a
-        # stamp in the future is YESTERDAY's late line, never fresh.
-        ($stamp != null) and ($stamp > $cutoff) and ($stamp <= (date now))
-    } | length)
-    let last: string = (if ($errors | is-empty) { "" } else { hard-wrap (trim100 ($errors | last)) 35 })
-    {log: $entry.name, errors: ($errors | length), fresh: $fresh, last: $last}
+    # the error predicate, the stamp parse and the freshness rule ride
+    # lib/fleet-errors.nu (tested); one `now` per log keeps the window honest.
+    scan-lines $entry.name $lines $cutoff (date now)
 }
 
 def main [
