@@ -2,6 +2,10 @@
 # carry no logic by design; their ONE invariant is structural: the canonical
 # script and the nu binary they invoke must EXIST. A moved canonical script
 # must fail the gate, not a deploy.
+# covers: /Users/lattenero/Scripts/scripts/zcode-bot-kotlin-deploy.nu
+# covers: /Users/lattenero/Scripts/scripts/zcode-brain-deploy.nu
+# covers: /Users/lattenero/Scripts/scripts/zcode-fork-deploy.nu
+# covers: /Users/lattenero/Scripts/scripts/zcode-whatsapp-kotlin-deploy.nu
 use std/assert
 
 const SELF: path = (path self)

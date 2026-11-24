@@ -1,6 +1,8 @@
 # test_worktree.nu — the pure-core proofs for lib/worktree.nu: the main-line
 # pick, the path convention, the add-args decision, the porcelain parse and
-# the merged-list marker strip.
+# the merged-list marker strip. It also covers the two thin CLIs over it.
+# covers: /Users/lattenero/Scripts/scripts/wt.nu
+# covers: /Users/lattenero/Scripts/scripts/wt-done.nu
 use std/assert
 use ../../lib/worktree.nu *
 
