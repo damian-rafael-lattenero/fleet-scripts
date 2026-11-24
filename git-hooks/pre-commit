@@ -7,4 +7,4 @@
 #   git config core.hooksPath scripts/git-hooks
 #
 # A hook that cannot run must NEVER pass silently: a missing gitleaks exits 1.
-exec /Users/lattenero/.local/bin/nu-nightly /Users/lattenero/Scripts/secret-scan.nu "$(git rev-parse --show-toplevel)" --staged
+exec /Users/lattenero/.local/bin/nu-nightly /Users/lattenero/Scripts/scripts/secret-scan.nu "$(git rev-parse --show-toplevel)" --staged
