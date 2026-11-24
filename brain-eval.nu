@@ -12,12 +12,11 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/brain-eval.log"
 const BRAIN: string = "/Users/lattenero/Projects/agent-brain/core/build/install/agent-brain/bin/agent-brain"
 const RAG_URL: string = "http://127.0.0.1:8765/rag/query"
 
-# The type aliases (the owner's 22/11 law): the shapes read once, the
-# signatures spell the name. Every case row carries xfail EXPLICITLY —
-# a record literal MISSING the key does not satisfy a oneof<..., nothing>
-# field (measured 22/11); explicit data beats optional keys.
-type EvalCase = record<kind: string, q: string, expect: string, xfail: bool>
-type CaseResult = record<q: string, surface: string, ok: bool, xfail: bool, score: string, top: string>
+# The shapes, the grading laws and the projections ride lib/brain-eval.nu
+# (tested). Every case row carries xfail EXPLICITLY — a record literal
+# MISSING the key does not satisfy a oneof<..., nothing> field (measured
+# 22/11); explicit data beats optional keys.
+use lib/brain-eval.nu *
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
 
@@ -49,31 +48,12 @@ def run-case [c: EvalCase]: nothing -> CaseResult {
     } else {
         do { ^$BRAIN memory search $c.q --k 3 } | complete
     })
-    if $out.exit_code != 0 {
-        return {q: $c.q, surface: $c.kind, ok: false, xfail: false, score: "-", top: "FAILED"}
-    }
+    if $out.exit_code != 0 { return (failed-case $c) }
     let parsed: any = ($out.stdout | from json)
-    # recall@k: the expectation may sit in ANY of the returned rows, and the
-    # match is case-insensitive (Nushell vs nushell — measured own bug).
-    let evidence: list<string> = (if $c.kind == "corpus" {
-        $parsed | get hits | each {|h| $h.title }
-    } else {
-        $parsed | get memories | each {|m| $m.content }
-    })
-    # a zero-hit surface is an honest FAIL row, never a crash: `first` on
-    # an empty list would kill the whole battery mid-run (measured 22/11).
-    let empty: bool = ($evidence | is-empty)
-    let expectLower: string = ($c.expect | str lowercase)
-    let ok: bool = ($evidence | any {|e| ($e | str lowercase) =~ $expectLower })
-    # xfail rows are DOCUMENTED limitations: they pass when they fail.
-    let verdict: bool = (if $c.xfail { not $ok } else { $ok })
-    let score: string = (if ($c.kind == "corpus") and (not $empty) {
-        ($parsed | get hits | first | get score? | default 0 | math round --precision 3 | into string)
-    } else {
-        "-"
-    })
-    let top: string = (if $empty { "no hits" } else { ($evidence | first | str substring 0..59) })
-    {q: $c.q, surface: $c.kind, ok: $verdict, xfail: $c.xfail, score: $score, top: $top}
+    # recall@k, the score string and the top cut ride the lib (tested): a
+    # zero-hit surface is an honest FAIL row, never a crash.
+    let evidence: list<string> = (case-evidence $c.kind $parsed)
+    grade-case $c $evidence (case-score $c.kind $parsed)
 }
 
 def main []: nothing -> nothing {

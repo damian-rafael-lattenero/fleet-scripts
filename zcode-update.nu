@@ -27,18 +27,15 @@ const BREW: string = "/opt/homebrew/bin/brew"
 const FORK_ROOT: string = "/Users/lattenero/Projects/ZCode"
 const BOT_ROOT: string = "/Users/lattenero/Projects/zcode-bot-kotlin"
 
-# The type aliases (the owner's 22/11 law): the shapes read once, the
-# signatures spell the name.
-type ToolVersion = record<tool: string, version: string>
+# The shape and the pure projections ride lib/zcode-update.nu (tested).
+use lib/zcode-update.nu *
 
 # One external's version line (complete captures the streams — KB
 # stdout_stderr_exit_codes.md; --version works for java since JDK 9 too).
-# `get -o 0` over `first`: an empty version output must land on the default,
-# never kill the panel (first-on-empty raises before default can act).
+# The stdout-else-stderr pick and the "(missing)" fallback ride the lib.
 def version-of [name: string]: nothing -> string {
     let out: record = do -i { ^$name --version } | complete
-    let text: string = if ($out.stdout | str trim) == "" { $out.stderr } else { $out.stdout }
-    $text | lines | get -o 0 | default "(missing)"
+    version-line $out.stdout $out.stderr
 }
 
 # The PINS — read-only from the repos; these move ONLY with a tested
@@ -47,12 +44,7 @@ def pins []: nothing -> table<tool: string, pin: string> {
     let desktop: record = open $"($FORK_ROOT)/packages/desktop/package.json"
     let root: record = open $"($FORK_ROOT)/package.json"
     let wrapper: string = open --raw $"($BOT_ROOT)/gradle/wrapper/gradle-wrapper.properties"
-    let gradle: string = ($wrapper | parse -r 'gradle-(?<v>[0-9.]+)' | get 0.v? | default "?")
-    [
-        {tool: "electron (fork desktop)", pin: ($desktop.devDependencies?.electron? | default "?")}
-        {tool: "pnpm (fork root field)", pin: ($root | get packageManager? | default "?")}
-        {tool: "gradle (bot wrapper)", pin: $gradle}
-    ]
+    pins-from $desktop $root $wrapper
 }
 
 # The panel: floating tools' live versions next to the pins — read-only
