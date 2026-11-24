@@ -160,6 +160,18 @@ let report = thunk {|| open data.csv | group-by region | each {|g| ...} }
 if $needs_report { force $report }   # built only when actually asked
 ```
 
+### mods/wait.nu — bounded readiness polling
+
+Nushell ships no "wait until". For a command that must block until a
+dependency answers, the deadline is MANDATORY (the reactive law: no unbounded
+loops), the probe is a predicate closure, and the interval is explicit — never
+a long blind sleep. Boot-time work should still prefer launchd's exit-75 retry
+(the `stack-up.nu` pattern); this mod is for the command in your hands.
+
+| function | type | summary |
+|---|---|---|
+| `wait-until` | `deadline: duration, probe: closure, --interval: duration = 500ms -> bool` | call `probe` until it answers true; `false` when the budget expires; ready-on-first-call pays no interval |
+
 ### mods/highlight.nu — terminal syntax highlighting (gap over builtins)
 
 `nu-highlight` is the only Nushell highlighter and it speaks nothing else;
