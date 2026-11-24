@@ -45,32 +45,22 @@ const PG_USER: string = "brain"
 # the boot chain the health-check and stack-up already agree on
 const AGENTS: list<string> = ["com.zcode.colima" "com.zcode.stack-up" "com.zcode.agent-brain" "com.zcode.brain-mcp"]
 
-# The type aliases (the owner's law): every shape reads once.
-type LayerProbe = record<ok: bool, detail: string>
+# The type aliases (the owner's law): every shape reads once. The probe
+# verdicts, the Prior ADT and the classifier ride lib/index-brain.nu (tested).
 type Layer = record<name: string, hint: string, probe: closure, repair: closure>
 type IndexLeg = record<leg: string, args: list<string>>
 type LegResult = record<leg: string, ok: bool, exit: int, secs: int, detail: string>
-# The Option shape over nushell-fp types.nu constructors (some/none).
-type Prior = record<tag: string, value: any>
 type VerifyRow = record<check: string, ok: bool, detail: string>
-# A classifier row: the predicate picks the branch, only the winner renders
-# (the anti-patterns law — chains die, precedence lives in row order).
-type RenderRule = record<when: closure, render: closure>
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
 use /Users/lattenero/Projects/nushell-fp/mods/proc.nu fold-stderr
 use /Users/lattenero/Projects/nushell-fp/mods/wait.nu wait-until
 use /Users/lattenero/Projects/nushell-fp/mods/types.nu *
+use lib/index-brain.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
     emit-to $LOG_FILE $line
-}
-
-# The first matching row renders; the catch-all row is last (row order = precedence).
-def classify [rules: list<RenderRule>]: nothing -> string {
-    let hit: RenderRule = ($rules | where {|r| do $r.when } | first)
-    (do $hit.render)
 }
 
 # ── the probes (pure reads: every external is parsed ONCE into a record) ──
@@ -78,8 +68,8 @@ def classify [rules: list<RenderRule>]: nothing -> string {
 def missing-agents []: nothing -> list<string> {
     let l: record = (^launchctl list | complete)
     if $l.exit_code != 0 { return $AGENTS }
-    let rows: table = ($l.stdout | lines | where {|r| $r =~ 'com\.zcode' } | parse "{pid}\t{exit}\t{label}")
-    $AGENTS | where {|n| ($rows | where label == $n | length) == 0 }
+    # the table parse rides lib/index-brain.nu (missing-from, tested)
+    missing-from $l.stdout $AGENTS
 }
 
 def probe-launchd []: nothing -> LayerProbe {
@@ -102,45 +92,29 @@ def probe-containers []: nothing -> LayerProbe {
     let ps: record = (^docker ps --format "{{.Names}}\t{{.Status}}" | complete)
     if $ps.exit_code != 0 { return {ok: false, detail: "docker not answering"} }
     let rows: table = ($ps.stdout | lines | where {|l| ($l | str trim) != "" } | parse "{name}\t{status}")
-    let running: table = ($rows | where name =~ '^agent-brain')
-    let has_pg: bool = (($running | where name == $PG_CONTAINER | length) > 0)
-    let unhealthy: table = ($running | where status !~ 'healthy')
-    let rules: list<RenderRule> = [
-        {when: {|| not $has_pg}, render: {|| $"($PG_CONTAINER) not running"}}
-        {when: {|| not ($unhealthy | is-empty)}, render: {|| $"unhealthy: ($unhealthy | get name | str join ', ')"}}
-        {when: {|| true}, render: {|| $"($running | length) running, all healthy"}}
-    ]
-    {ok: ($has_pg and ($unhealthy | is-empty)), detail: (classify $rules)}
+    # the "(healthy)"-exact verdict rides lib/index-brain.nu (tested)
+    containers-verdict $rows $PG_CONTAINER
 }
 
 def probe-pgvector []: nothing -> LayerProbe {
     let q: record = (^docker exec -i $PG_CONTAINER psql -U $PG_USER -d $PG_DB -t -A -c "select extversion from pg_extension where extname='vector';" | complete)
     if $q.exit_code != 0 { return {ok: false, detail: "psql not answering"} }
     let v: string = ($q.stdout | lines | where {|l| ($l | str trim) != "" } | first | default "" | str trim)
-    {ok: ($v | is-not-empty), detail: (if ($v | is-empty) { "vector extension MISSING" } else { $"vector ($v)" })}
+    pgvector-verdict $v
 }
 
 def probe-ollama []: nothing -> LayerProbe {
     let t: record = (^curl -s -m 5 $OLLAMA_TAGS | complete)
     if $t.exit_code != 0 or ($t.stdout | str trim | is-empty) { return {ok: false, detail: "ollama not answering"} }
     let models: list<string> = (try { $t.stdout | from json | get models | get name } catch { [] })
-    let hit: list<string> = ($models | where {|m| $m =~ $EMBED_MODEL })
-    {ok: (not ($hit | is-empty)), detail: (if ($hit | is-empty) { $"($EMBED_MODEL) NOT loaded" } else { $hit | first })}
+    ollama-verdict $models $EMBED_MODEL
 }
 
 def probe-serve []: nothing -> LayerProbe {
     let r: record = (^curl -s -m 6 $SERVE_READY | complete)
     if $r.exit_code != 0 or ($r.stdout | str trim | is-empty) { return {ok: false, detail: "/ready not answering"} }
     let j: record = (try { $r.stdout | from json } catch { {status: "unparseable"} })
-    let pending: list<string> = ($j.checks?.db?.pending? | default [])
-    let embed_ok: bool = ($j.checks?.embed?.ok? | default false)
-    let rules: list<RenderRule> = [
-        {when: {|| $j.status != "ok"}, render: {|| $"status ($j.status)"}}
-        {when: {|| not ($pending | is-empty)}, render: {|| $"pending migrations: ($pending | str join ', ')"}}
-        {when: {|| not $embed_ok}, render: {|| "embed probe failed"}}
-        {when: {|| true}, render: {|| $"ok — db + embed ($j.checks?.embed?.model? | default '?')"}}
-    ]
-    {ok: ($j.status == "ok" and ($pending | is-empty) and $embed_ok), detail: (classify $rules)}
+    serve-verdict $j
 }
 
 # ── the repairs (each bounded by wait-until — no blind long sleeps) ──
@@ -244,11 +218,9 @@ def ensure [layer: Layer, fix: bool]: nothing -> LayerProbe {
 
 def doc-stats []: nothing -> Prior {
     let q: record = (^docker exec -i $PG_CONTAINER psql -U $PG_USER -d $PG_DB -t -A -c "select count(*)::text || '|' || coalesce(to_char(max(updated_at), 'YYYY-MM-DD'), '-') from documents;" | complete)
-    if $q.exit_code != 0 { return none }
-    let line: string = ($q.stdout | lines | where {|l| ($l | str trim) != "" } | first | default "" | str trim)
-    let parts: list<string> = ($line | split row '|')
-    if ($parts | length) < 2 { return none }
-    some {docs: ($parts.0 | into int), freshest: $parts.1}
+    if $q.exit_code != 0 { return (none) }
+    # the count|freshest parse rides lib/index-brain.nu (doc-stats-parse)
+    doc-stats-parse $q.stdout
 }
 
 def index-legs []: nothing -> list<IndexLeg> {
@@ -323,9 +295,7 @@ def main [--check]: nothing -> nothing {
 
     # The receipts: docs before → after, plus the three smoke calls.
     let after: Prior = (doc-stats)
-    let delta: string = ($before | option-match {|b|
-        $after | option-match {|a| $"+($a.docs - $b.docs) docs · freshest ($a.freshest)" } {|| "?" }
-    } {|| "?" })
+    let delta: string = (delta-line $before $after)
     emit $"📄 documents: ($delta)"
     let checks: list<VerifyRow> = (verify-rows)
     mut verifyFailures: int = 0
