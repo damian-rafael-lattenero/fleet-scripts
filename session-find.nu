@@ -12,6 +12,8 @@
 # The index only knows what the fork's task list knows; sessions the fork
 # never titled show with an empty title and their sid tail as the handle.
 
+use lib/session-find.nu *
+
 const INDEX: string = "/Users/lattenero/.zcode/v2/tasks-index.sqlite"
 
 # Render the matches as the thin table (the render laws: local theme —
@@ -23,19 +25,9 @@ def main [
     --limit: int = 15     # newest N matches
     --all                 # include deleted and archived rows too
 ]: nothing -> nothing {
-    # the user's text rides into a LIKE clause — the '' doubling is the
-    # SQL escape (a local read-only query, but the boundary still escapes)
-    let safe: string = ($text | str replace -a "'" "''")
-    let alive: string = (if $all { "1=1" } else { "deleted = 0 AND archived = 0" })
-    # CONCATENATION, not interpolation: the SQL's literal parens — datetime(...),
-    # the LIKE groups — would parse as command calls inside $"..." (the
-    # psql-count law, re-measured here on the first live run)
-    let sql: string = (
-        "SELECT task_id, title, workspace_path, task_status, datetime(updated_at / 1000, 'unixepoch', 'localtime') AS updated "
-        + "FROM tasks WHERE " + $alive
-        + " AND (task_id LIKE '%" + $safe + "%' OR title LIKE '%" + $safe + "%' OR workspace_path LIKE '%" + $safe + "%') "
-        + "ORDER BY updated_at DESC LIMIT " + ($limit | into string)
-    )
+    # the text rides into a LIKE clause — the lib doubles the quotes (a local
+    # read-only query, but the boundary still escapes)
+    let sql: string = (find-sql $text $limit $all)
     let out: record = (do { ^sqlite3 -json $"file:($INDEX)?mode=ro" $sql } | complete)
     if $out.exit_code != 0 {
         print -e $"✗ the index read failed: ($out.stderr | str trim | str substring 0..160)"
@@ -46,16 +38,6 @@ def main [
         print $"no sessions match '($text)' — --all widens to deleted/archived"
         return
     }
-    print ($rows
-        | each {|r|
-            {
-                sid: $r.task_id
-                title: ($r.title | default "" | str substring 0..44)
-                ws: ($r.workspace_path | path basename)
-                status: ($r.task_status | default "")
-                updated: $r.updated
-            }
-        }
-        | table)
+    print (match-rows $rows | table)
     print $"($rows | length) matches — the sid is the attach handle"
 }
