@@ -21,22 +21,16 @@
 
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/brain.log"
 const BRAIN: string = "/Users/lattenero/Projects/agent-brain/core/build/install/agent-brain/bin/agent-brain"
-const KINDS: list<string> = [fact decision preference summary]
 
-# The type aliases (the owner's 22/11 law): every shape reads once and the
-# signatures spell the name. Nullable string flags = oneof<string, nothing>
-# (a bare null literal against a plain string field fails the parse).
-type ModeRow = record<mode: string, when: closure>
-type Flags = record<question: oneof<string, nothing>, search: oneof<string, nothing>, save: oneof<string, nothing>, kind: string, recent: bool, iterate: bool>
-type ModeCmd = record<mode: string, text: oneof<string, nothing>, kind: string, iterate: bool>
+# The flags→mode classification, the kind cover and the render projections
+# live in the pure core (lib/brain.nu, tested); the script keeps the effects.
 type Dispatch = record<rag: closure, search: closure, save: closure, recent: closure, usage: closure>
-type HitRow = record<score: float, title: string, what: string>
-type MemoryRow = record<id: int, kind: string, memory: string>
 
 $env.config.table.mode = "thin"
 
 use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
 use /Users/lattenero/Projects/nushell-fp/mods/proc.nu *
+use lib/brain.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
 def emit [line: string]: nothing -> nothing {
@@ -66,9 +60,7 @@ def rag-section [q: string, k: int, iterate: bool]: nothing -> nothing {
         emit "no hits"
         return
     }
-    let rows: list<HitRow> = ($hits | each {|h|
-        {score: ($h.score? | default 0 | math round --precision 3), title: $h.title, what: ($h.content | str replace -a "\n" " " | str substring 0..69)}
-    })
+    let rows: list<HitRow> = (hit-rows $hits)
     emit ($rows | table)
     emit $"($hits | length) hits · top source: ($hits | first | get uri)"
 }
@@ -80,8 +72,7 @@ def search-section [text: string, k: int]: nothing -> nothing {
         emit $"search failed — (fold-stderr $out | str substring 0..119)"
         return
     }
-    let rows: list<MemoryRow> = ($out.stdout | from json | get memories
-        | each {|m| {id: $m.id, kind: $m.kind, memory: ($m.content | str substring 0..79)} })
+    let rows: list<MemoryRow> = (memory-rows ($out.stdout | from json | get memories))
     if ($rows | is-empty) {
         emit "no memories match"
     } else {
@@ -96,8 +87,7 @@ def recent-section [k: int]: nothing -> nothing {
         emit "brain degraded: recent unavailable"
         return
     }
-    let rows: list<MemoryRow> = ($out.stdout | from json
-        | each {|m| {id: $m.id, kind: $m.kind, memory: ($m.content | str substring 0..79)} })
+    let rows: list<MemoryRow> = (memory-rows ($out.stdout | from json))
     emit ($rows | table)
 }
 
@@ -114,33 +104,9 @@ def save-section [kind: string, text: string]: nothing -> nothing {
     }
 }
 
-# The mode table: priority-ordered predicates — the FIRST row whose
-# predicate holds wins. The precedence lives in the ROW ORDER, not in
-# nested branches; adding a mode = adding a row. Zero if/else in the flow.
-def mode-table []: nothing -> list<ModeRow> {
-    [
-        {mode: "search", when: {|f| $f.search != null}}
-        {mode: "save", when: {|f| $f.save != null}}
-        {mode: "recent", when: {|f| $f.recent}}
-        {mode: "rag", when: {|f| $f.question != null}}
-        {mode: "usage", when: {|f| true}}
-    ]
-}
-
-# parse-don't-validate: flags classified ONCE into one uniform payload —
-# text is the mode's primary input (question ?? search ?? save).
-def pick-mode [f: Flags]: nothing -> ModeCmd {
-    let winner: ModeRow = (mode-table | where {|row| do $row.when $f } | first)
-    {
-        mode: $winner.mode
-        text: ($f.question? | default ($f.search? | default $f.save?))
-        kind: $f.kind
-        iterate: $f.iterate
-    }
-}
-
 # The dispatch table: mode → closure over the mode record. Data, not flow —
-# the same shape as the owner's `commands` map in config.nu.
+# the same shape as the owner's `commands` map in config.nu. (mode-table and
+# pick-mode live in lib/brain.nu: the pure classification, tested.)
 def dispatch-table [k: int]: nothing -> Dispatch {
     {
         rag: {|c| rag-section $c.text $k $c.iterate}
