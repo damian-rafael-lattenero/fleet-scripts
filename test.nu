@@ -1,21 +1,23 @@
 #!/usr/bin/env nu
-# test.nu — gate for ~/Scripts: nu-check every script and every lib module
-# (syntax/compile only, nothing runs), then run every tests/*.nu script.
-# Offenders are reported by name; a failing script makes the gate exit non-zero.
+# test.nu — gate for ~/Scripts: nu-check every script (scripts/, hooks
+# included) and every lib module (syntax/compile only, nothing runs), then
+# run every test under tests/ (any depth: tests/lib/<x>.nu mirrors lib/x.nu,
+# tests/scripts/<x>.nu mirrors scripts/x.nu). Offenders are reported by name;
+# a failing script makes the gate exit non-zero.
 #
 #   nu ~/Scripts/test.nu
 
 const SELF: path = (path self)
 
 def main []: nothing -> nothing {
-    let root: path = ($SELF | path dirname)
-    let scripts: list<string> = (glob ($root | path join '*.nu') | sort)
-    let modules: list<string> = (glob ($root | path join 'lib/*.nu') | sort)
-    let tests: list<string> = (glob ($root | path join 'tests/*.nu') | sort)
+    let root: path = (($SELF | path expand) | path dirname)
+    let scripts: list<string> = (glob ($root | path join 'scripts' '**' '*.nu') | sort)
+    let modules: list<string> = (glob ($root | path join 'lib' '**' '*.nu') | sort)
+    let tests: list<string> = (glob ($root | path join 'tests' '**' '*.nu') | sort)
 
-    let bad_modules: list<string> = (($scripts | append $modules) | where {|m| not (nu-check $m)})
-    if not ($bad_modules | is-empty) {
-        error make {msg: ("nu-check failed: " + ($bad_modules | str join ", "))}
+    let bad: list<string> = (($scripts | append $modules) | where {|m| not (nu-check $m)})
+    if not ($bad | is-empty) {
+        error make {msg: ("nu-check failed: " + ($bad | str join ", "))}
     }
 
     let failures: list<string> = ($tests | each {|script|
