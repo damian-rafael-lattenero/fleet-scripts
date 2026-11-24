@@ -25,7 +25,7 @@ const GITLEAKS: string = "/opt/homebrew/bin/gitleaks"
 const TRUFFLEHOG: string = "/opt/homebrew/bin/trufflehog"
 const CONFIG: string = "/Users/lattenero/.config/gitleaks/gitleaks.toml"
 
-use /Users/lattenero/Projects/nushell-fp/mods/proc.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/proc.nu *
 use ../lib/secret-scan.nu *
 
 def die [msg: string]: nothing -> nothing {

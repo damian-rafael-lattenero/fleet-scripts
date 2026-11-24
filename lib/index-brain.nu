@@ -2,7 +2,7 @@
 # classifier, the launchctl/psql parses, the four layer verdicts (containers,
 # pgvector, ollama, serve) and the docs delta. The script keeps every probe's
 # external call, the ladder data and the repairs.
-use /Users/lattenero/Projects/nushell-fp/mods/types.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/types.nu *
 
 export type LayerProbe = record<ok: bool, detail: string>
 export type Prior = record<tag: string, value: any>

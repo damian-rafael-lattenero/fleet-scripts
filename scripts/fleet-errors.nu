@@ -34,8 +34,8 @@ const LOG_FILE: string = "/Users/lattenero/Library/Logs/fleet-errors.log"
 # the script itself (measured 21/11).
 $env.config.table.mode = "thin"
 
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
-use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/fmt.nu *
 use ../lib/log-scan.nu *
 use ../lib/fleet-errors.nu *
 

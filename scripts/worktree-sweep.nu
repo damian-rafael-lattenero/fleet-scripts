@@ -30,7 +30,7 @@ const PROTECTED: list<string> = [master main damian develop]
 
 # The sweep shapes ride lib/worktree-sweep.nu (tested); the porcelain parse
 # rides lib/worktree.nu.
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
 use ../lib/worktree.nu *
 use ../lib/worktree-sweep.nu *
 

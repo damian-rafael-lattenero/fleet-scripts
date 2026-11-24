@@ -1,7 +1,7 @@
 # lib/fleet-errors.nu — the pure core of fleet-errors.nu: the error predicate,
 # the stamp parse, the freshness rule and the per-log scan. The script keeps
 # the file reads (tail) and the log voice.
-use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/fmt.nu *
 use ./log-scan.nu *
 
 export type LogScan = record<log: string, errors: int, fresh: int, last: string>

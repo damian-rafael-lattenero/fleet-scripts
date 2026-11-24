@@ -49,8 +49,8 @@ const SWAP_STALE_MB: int = 2048
 # receipt lines ride lib/ram-clean.nu (tested: tests/test_ram_clean.nu);
 # IDLE_CPU (the idle threshold) rides it too. The script keeps every kill,
 # read and write — the effects at the edge.
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
-use /Users/lattenero/Projects/nushell-fp/mods/types.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/types.nu *
 use ../lib/ram-clean.nu *
 use ../lib/json-lines.nu *
 

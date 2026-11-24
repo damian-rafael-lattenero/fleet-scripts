@@ -3,7 +3,7 @@
 # protect set, the island partition and the receipt lines.
 use std/assert
 use ../../lib/ram-clean.nu *
-use /Users/lattenero/Projects/nushell-fp/mods/types.nu *   # some/none constructors
+use /Users/lattenero/Scripts/nushell-fp/mods/types.nu *   # some/none constructors
 
 # 1. memory_pressure: the percentage parses, the LAST matching line wins,
 #    and a changed shape is a loud error (never a wrong number).

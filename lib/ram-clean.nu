@@ -2,7 +2,7 @@
 # swap/ollama parsers, the family table, the ledger arithmetic (snapshot,
 # prune, trend, leak), the protect set and the island partition, and the
 # post-kill receipt lines. The script keeps every kill, read and write.
-use /Users/lattenero/Projects/nushell-fp/mods/types.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/types.nu *
 use ./json-lines.nu *
 
 export type PsRow = record<pid: int, ppid: int, cpu: float, name: string>

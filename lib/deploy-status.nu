@@ -2,7 +2,7 @@
 # classifiers as predicate tables (probe state, cpu verdict, end marker) plus
 # the pid and last-line projections. The script keeps the launchctl/ps/tail
 # effects.
-use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/fmt.nu *
 
 # not loaded wins, then RUNNING, then the honest idle catch-all.
 export def state-of [probe_ok: bool, running: bool]: nothing -> string {

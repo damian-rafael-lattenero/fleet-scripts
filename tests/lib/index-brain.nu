@@ -3,7 +3,7 @@
 # the docs delta (option-match over the Prior ADT).
 use std/assert
 use ../../lib/index-brain.nu *
-use /Users/lattenero/Projects/nushell-fp/mods/types.nu *   # some/none constructors
+use /Users/lattenero/Scripts/nushell-fp/mods/types.nu *   # some/none constructors
 
 # 1. the classifier: row order is precedence; the catch-all renders last.
 let rules: list<RenderRule> = [

@@ -18,7 +18,7 @@ const RAG_URL: string = "http://127.0.0.1:8765/rag/query"
 # 22/11); explicit data beats optional keys.
 use ../lib/brain-eval.nu *
 
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work
 # (the hand-rolled print+save copy leaves the family contract).

@@ -52,10 +52,10 @@ type IndexLeg = record<leg: string, args: list<string>>
 type LegResult = record<leg: string, ok: bool, exit: int, secs: int, detail: string>
 type VerifyRow = record<check: string, ok: bool, detail: string>
 
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
-use /Users/lattenero/Projects/nushell-fp/mods/proc.nu fold-stderr
-use /Users/lattenero/Projects/nushell-fp/mods/wait.nu wait-until
-use /Users/lattenero/Projects/nushell-fp/mods/types.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/proc.nu fold-stderr
+use /Users/lattenero/Scripts/nushell-fp/mods/wait.nu wait-until
+use /Users/lattenero/Scripts/nushell-fp/mods/types.nu *
 use ../lib/index-brain.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.

@@ -48,7 +48,7 @@
 const NU: string = "/Users/lattenero/.local/bin/nu-nightly"
 const LOGDIR: string = "/tmp/deploy-all"
 const LOG_FILE: string = "/Users/lattenero/Library/Logs/zcode-deploy-all.log"
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
 
 # One voice for stdout AND the run log — the wave's own receipt must survive
 # the terminal that launched it (the fleet family's contract).

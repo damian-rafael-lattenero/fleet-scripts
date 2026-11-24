@@ -24,8 +24,8 @@ const JOBS: list<DeployJob> = [
     {job: "fork", label: "com.zcode.deploy-fork", log: "/Users/lattenero/.zcode/bot-kotlin/logs/deploy-fork.log"}
 ]
 
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
-use /Users/lattenero/Projects/nushell-fp/mods/fmt.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/fmt.nu *
 use ../lib/log-scan.nu *
 use ../lib/deploy-status.nu *
 

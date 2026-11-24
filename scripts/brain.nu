@@ -28,8 +28,8 @@ type Dispatch = record<rag: closure, search: closure, save: closure, recent: clo
 
 $env.config.table.mode = "thin"
 
-use /Users/lattenero/Projects/nushell-fp/mods/log.nu *
-use /Users/lattenero/Projects/nushell-fp/mods/proc.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
+use /Users/lattenero/Scripts/nushell-fp/mods/proc.nu *
 use ../lib/brain.nu *
 
 # One voice for stdout AND the run log — the shared mod does the work.
