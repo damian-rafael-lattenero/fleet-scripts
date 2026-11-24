@@ -99,20 +99,8 @@ def swap-line []: nothing -> string {
 }
 
 def pid-cpu [line: string]: nothing -> CpuRow {
-    let t: string = ($line | str trim)
-    let parts: list<string> = ($t | split row -r '\s+')
-    {pid: ($parts | get 0 | into int), cpu: ($parts | get 1 | into float)}
-}
-
-# An args-bearing ps line (pid ppid cpu + the full command) as one row.
-def args-row [line: string]: nothing -> ArgsRow {
-    let parts: list<string> = (($line | str trim) | split row -r '\s+')
-    {
-        pid: ($parts | get 0 | into int)
-        ppid: ($parts | get 1 | into int)
-        cpu: ($parts | get 2 | into float)
-        args: ($parts | skip 3 | str join ' ')
-    }
+    let r: record = ($line | parse -r '^\s*(?<pid>\d+)\s+(?<cpu>[\d.]+)' | get 0)
+    {pid: ($r.pid | into int), cpu: ($r.cpu | into float)}
 }
 
 # The full ps snapshot as records (the builtin ps lacks pcpu and comm).
@@ -120,21 +108,25 @@ def snap []: nothing -> list<PsRow> {
     ^ps -axo pid=,ppid=,pcpu=,comm=
     | lines
     | where {|l| ($l | str trim) != "" }
-    | each {|l|
-        let t: string = ($l | str trim)
-        let parts: list<string> = ($t | split row -r '\s+')
-        {pid: ($parts | get 0 | into int), ppid: ($parts | get 1 | into int), cpu: ($parts | get 2 | into float), name: ($parts | get 3 | path basename)}
+    | parse -r '^\s*(?<pid>\d+)\s+(?<ppid>\d+)\s+(?<cpu>[\d.]+)\s+(?<comm>.+)$'
+    | each {|r|
+        {pid: ($r.pid | into int), ppid: ($r.ppid | into int), cpu: ($r.cpu | into float), name: ($r.comm | path basename)}
     }
 }
 
-# RSS-aware snapshot: ps rss is KB; the owner reads MB.
+# RSS-aware snapshot: ps rss is KB; the owner reads MB. The comm tail is
+# GREEDY: ps comm is a PATH and macOS app paths carry spaces — the old
+# positional split truncated 27 of 421 names (measured 24/11: suhelperd read
+# as "Software", and Chrome/VS Code grouped by whichever token landed in
+# column 4). The builtin `parse` template is NOT greedy on the tail
+# (measured 24/11: leading pad spaces shift every capture) — `parse -r` is.
 def rss-snap []: nothing -> list<RssRow> {
     ^ps -axo rss=,pid=,pcpu=,comm=
     | lines
     | where {|l| ($l | str trim) != "" }
-    | each {|l|
-        let parts: list<string> = (($l | str trim) | split row -r '\s+')
-        {rssMb: (($parts | get 0 | into int) / 1024 | math round), pid: ($parts | get 1 | into int), cpu: ($parts | get 2 | into float), name: ($parts | get 3 | path basename)}
+    | parse -r '^\s*(?<rss>\d+)\s+(?<pid>\d+)\s+(?<cpu>[\d.]+)\s+(?<comm>.+)$'
+    | each {|r|
+        {rssMb: (($r.rss | into int) / 1024 | math round), pid: ($r.pid | into int), cpu: ($r.cpu | into float), name: ($r.comm | path basename)}
     }
 }
 
@@ -151,6 +143,11 @@ def family-table []: nothing -> list<FamilyRule> {
         {pattern: '^zcode', family: "zcode-family"}
         {pattern: '^logi', family: "logi-family"}
         {pattern: '^google', family: "chrome-family"}
+        # VS Code's main binary is `Code` and its helpers are `Code Helper…`
+        # — the 24/11 parse fix exposed them as 4 buckets (the old truncation
+        # collapsed them into "Code" by accident). Anchored so `codesign…`
+        # never matches.
+        {pattern: '^code helper|^code$', family: "vscode-family"}
         {pattern: 'llama-server', family: "ollama-runners"}
         {pattern: '', family: null}
     ]
@@ -162,13 +159,32 @@ def family-of [name: string]: nothing -> string {
     ($hit.family | default $name)
 }
 
-# The families aggregated (sum RSS + process count), the biggest first.
-def families []: nothing -> list<FamilySum> {
-    rss-snap
+# The families aggregated (sum RSS + process count), the biggest first. The
+# rows arrive as input: ONE rss-snap per run feeds the ledger, the top-10,
+# LoginItems and the logi report (the parse-once law — it used to run 4×).
+def families [rows: list<RssRow>]: nothing -> list<FamilySum> {
+    $rows
     | insert family {|r| family-of $r.name }
     | group-by family
     | items {|k, v| {family: $k, rssMb: ($v | get rssMb | math sum), n: ($v | length)} }
     | sort-by -r rssMb
+}
+
+# The RSS total of one process name in a scan — 0 when absent (the fam-rss
+# convention; `math sum` refuses empty input, measured 24/11).
+def rss-of [rows: list<RssRow>, name: string]: nothing -> int {
+    let hits: list<RssRow> = ($rows | where name == $name)
+    $hits | reduce -f 0 {|r, acc| $acc + $r.rssMb}
+}
+
+# The logi family's process rows — the family TABLE decides membership, not
+# a second copy of the `^logi`/`^login` rule (its first row already keeps
+# macOS's LoginItems/loginwindow out; measured false positives 21/11).
+def logi-rows [rows: list<RssRow>]: nothing -> table {
+    $rows
+    | insert family {|r| family-of $r.name }
+    | where family == "logi-family"
+    | select name pid rssMb cpu
 }
 
 # Write this run's snapshot to the JSONL ledger — ONE whole-file write that
@@ -345,15 +361,31 @@ def islands [prot: list<int>]: nothing -> IslandScan {
     let rows: list<ArgsRow> = (^ps -axo pid=,ppid=,pcpu=,args=
         | lines
         | where {|l| ($l | str trim) != "" }
-        | each {|l| args-row $l })
+        | parse -r '^\s*(?<pid>\d+)\s+(?<ppid>\d+)\s+(?<cpu>[\d.]+)\s+(?<args>.+)$'
+        | each {|r|
+            {pid: ($r.pid | into int), ppid: ($r.ppid | into int), cpu: ($r.cpu | into float), args: ($r.args | str trim)}
+        })
     island-partition $rows $prot
 }
 
-# "total = 4096.00M used = 2434.00M free = ..." → the used MB as int.
-def swap-used-mb []: nothing -> int {
-    let line: string = (^sysctl -n vm.swapusage | str trim)
+# "total = 4096.00M used = 2434.00M free = ..." → the used MB as int. The
+# line arrives from the caller: ONE sysctl per phase, not two (measured
+# 24/11 — swap-line and this each ran their own).
+def swap-used-mb [line: string]: nothing -> int {
     let used: string = ($line | split row "used = " | get 1 | split row "M" | get 0 | str trim)
     ($used | into int)
+}
+
+# THE execute shape, once: when the run is a --clean and there is anything
+# to kill, kill once and speak the receipt. It replaced five verbatim
+# copies of `if $clean and (...) { kill ...; emit ...; $pids } else { [] }`
+# — the sixth copy would have had to remember the guard on its own.
+# label is the whole receipt sentence ("AppleSpell — it respawns on demand").
+def kill-when [clean: bool, label: string, pids: list<int>]: nothing -> list<int> {
+    if (not $clean) or ($pids | is-empty) { return [] }
+    kill ...$pids
+    emit $"killed ($label): ($pids | str join ', ')"
+    $pids
 }
 
 def main [
@@ -366,10 +398,11 @@ def main [
     let stamp: string = (date now | format date "%Y-%m-%d %H:%M:%S")
     let ps: list<PsRow> = (snap)
     let prot: list<int> = (protect-set $ps)
+    let rss: list<RssRow> = (rss-snap)
     let freeBefore: int = (free-pct)
     let swapBefore: string = (swap-line)
     let boot: int = (^sysctl -n kern.boottime | parse -r 'sec = (?<sec>\d+)' | get 0.sec | into int)
-    let swapUsed: int = (swap-used-mb)
+    let swapUsed: int = (swap-used-mb $swapBefore)
     emit $"== ram-clean ($stamp) — clean=($clean) trend=($trend) =="
 
     # -2. --trend: the ledger's history as a time series — READ-ONLY, no
@@ -394,14 +427,14 @@ def main [
     let ledger: list<Snapshot> = (ledger-rows)
     let prev: Prior = (last-snapshot $ledger)
     let bootSnap: Prior = (boot-snapshot $ledger $boot)
-    let fams: list<FamilySum> = (families | first 60)
+    let fams: list<FamilySum> = (families $rss | first 60)
     snapshot-write $ledger $fams $boot $freeBefore $swapUsed
     leak-report $fams $prev $bootSnap $leak_run_mb $leak_boot_mb $swapUsed
 
     # 0. the pattern surface: who holds the memory right now.
     emit $"before: free ($freeBefore)% · swap ($swapBefore)"
     emit "== top 10 memory citizens (MB) =="
-    emit (rss-snap | sort-by -r rssMb | first 10 | select name pid rssMb cpu | table)
+    emit ($rss | sort-by -r rssMb | first 10 | select name pid rssMb cpu | table)
 
     # 1. Task-Island zcode-cli processes — descendant-aware: an island dies
     #    only when nothing below it breathes either.
@@ -410,11 +443,7 @@ def main [
     for h in $scan.held {
         emit $"island held: ($h.pid) — descendant ($h.breatherPid) breathes at ($h.breatherCpu)% — not killed"
     }
-    let isleKills: list<int> = (if $clean and (($scan.killable | length) > 0) {
-        kill ...($scan.killable | get pid)
-        emit $"killed islands: ($scan.killable | get pid | str join ', ')"
-        $scan.killable | get pid
-    } else { [] })
+    let isleKills: list<int> = (kill-when $clean "idle islands" ($scan.killable | get pid))
 
     # 2. ollama pattern: the brain's embedder stays, the rest reload on demand.
     let ops: record = (do { run-external $OLLAMA ps } | complete)
@@ -434,11 +463,7 @@ def main [
     # 3. AppleSpell growth bug.
     let spell: list<int> = ($ps | where name == "AppleSpell" | get pid)
     emit $"AppleSpell: ($spell | str join ', ')"
-    let spellKills: list<int> = (if $clean and (($spell | length) > 0) {
-        kill ...$spell
-        emit "AppleSpell killed — it respawns small on demand"
-        $spell
-    } else { [] })
+    let spellKills: list<int> = (kill-when $clean "AppleSpell — it respawns small on demand" $spell)
 
     # 4. idle build daemons — Gradle AND Kotlin compile daemons, matched by
     #    their daemon markers (the java family also holds LIVE infra —
@@ -451,32 +476,21 @@ def main [
         | each {|l| pid-cpu $l }
         | where {|r| $r.cpu < $IDLE_CPU })
     emit $"idle build daemons — gradle+kotlin: ($builds | length) — pids ($builds | get pid | str join ', ')"
-    let buildKills: list<int> = (if $clean and (($builds | length) > 0) {
-        kill ...($builds | get pid)
-        emit $"killed build daemons: ($builds | get pid | str join ', ')"
-        $builds | get pid
-    } else { [] })
+    let buildKills: list<int> = (kill-when $clean "idle build daemons (gradle+kotlin)" ($builds | get pid))
 
     # 5. LoginItems — the macOS host of the login-item daemons (the Logi
     #    services live INSIDE it). Measured 21/11: 1163 MB at 13:15 → 1549 MB
     #    at 19:11 with 100% cpu — THE felt leak. A restart respawns it clean.
     let loginItems: list<int> = ($ps | where name == "LoginItems" | get pid)
-    let liRss: int = (rss-snap | where name == "LoginItems" | get -o 0 | default {rssMb: 0} | get -o rssMb | default 0)
+    let liRss: int = (rss-of $rss "LoginItems")
     emit $"LoginItems — the login-item host where the Logi services live: ($liRss) MB"
-    let loginKills: list<int> = (if $clean and (($loginItems | length) > 0) {
-        kill ...$loginItems
-        emit "LoginItems restarted — it respawns clean and the login-item daemons come back with it"
-        $loginItems
-    } else { [] })
+    let loginKills: list<int> = (kill-when $clean "LoginItems — it respawns clean and the login-item daemons come back with it" $loginItems)
 
     # 6. the Logi Options+ family — report + only the crash reporter dies.
-    # macOS system processes (LoginItems, loginwindow, logind, login) also
-    # start with "logi" — measured false positives 21/11 that inflated the
-    # family total by >1 GB; exclude them explicitly.
-    let logi: table = (rss-snap | where {|r|
-        let low: string = ($r.name | str lowercase)
-        ($low =~ '^logi') and (not ($low =~ '^login'))
-    } | select name pid rssMb cpu)
+    # Membership is the family TABLE's decision (its `^login` row keeps the
+    # macOS processes out — the 21/11 false positives that inflated the
+    # family by >1 GB live there, once).
+    let logi: table = (logi-rows $rss)
     if ($logi | is-empty) {
         emit "logi family: not running"
     } else {
@@ -487,11 +501,7 @@ def main [
     # Only the crash reporter dies — hoisted out of the report branch so
     # the receipts pass below can see what was killed.
     let crashpads: list<int> = ($logi | where name == "logi_crashpad_handler" | get pid)
-    let crashpadKills: list<int> = (if $clean and (($crashpads | length) > 0) {
-        kill ...$crashpads
-        emit "logi_crashpad_handler killed — it respawns when a crash needs reporting"
-        $crashpads
-    } else { [] })
+    let crashpadKills: list<int> = (kill-when $clean "logi_crashpad_handler — it respawns when a crash needs reporting" $crashpads)
 
     if $clean {
         sleep 2sec
@@ -528,7 +538,7 @@ def main [
             if ($line != "") { emit $line }
         }
         if not ($loginKills | is-empty) {
-            let liRss2: int = (rss-snap | where name == "LoginItems" | get -o 0 | default {rssMb: 0} | get -o rssMb | default 0)
+            let liRss2: int = (rss-of (rss-snap) "LoginItems")
             if ($liRss2 == 0) {
                 emit "LoginItems: killed → not yet respawned after 2s — launchd brings it back"
             } else {
@@ -549,7 +559,7 @@ def main [
         }
         let freeAfter: int = (free-pct)
         let swapAfter: string = (swap-line)
-        let swapUsedAfter: int = (swap-used-mb)
+        let swapUsedAfter: int = (swap-used-mb $swapAfter)
         emit $"after: free ($freeAfter)% · swap ($swapAfter)"
         emit $"freed: ($freeAfter - $freeBefore) points of free percentage · swap Δ ($swapUsedAfter - $swapUsed) MB"
         # The honest swap ceiling: killed processes release their swapped
