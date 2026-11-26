@@ -7,6 +7,21 @@
 # The inline transform is kept for an explicit `nu -c "PAYLOAD"` (nested use).
 # Never silent on deny: stderr = the reason the model reads.
 
+const DENIALS: path = '/Users/lattenero/.zcode/hooks/state/denials.tsv'
+
+# The denial ledger: ONE tab-separated line per deny (ts, session, hook, rule,
+# language, target), written right before the deny. It never moves the
+# verdict: a failed write is dropped and the deny goes out unchanged.
+def log-denial [log: path, sid: string, hook: string, rule: string, language: string, target: string]: nothing -> nothing {
+  try {
+    mkdir ($log | path dirname)
+    [(date now | format date '%FT%T%:z') $sid $hook $rule $language ($target | str replace -a "\t" ' ' | str replace -a "\n" ' ' | str replace -a "\r" ' ' | str substring 0..119)]
+    | str join "\t"
+    | $"($in)\n"
+    | save --append $log
+  } catch { }
+}
+
 # REACTIVE LAW: blind sleep >= 10s is forbidden (poll-less: job spawn/send/recv --timeout, or watch).
 # Short sleeps (< 10s) stay legal as measured retry-gaps (e.g. the launchd bootout->bootstrap 2s race gap).
 def long-sleep [cmd: string]: nothing -> string {
@@ -52,13 +67,15 @@ def transform-inline [cmd: string]: nothing -> record {
   }
 }
 
-def main []: string -> nothing {
+def main [--log: path = $DENIALS]: string -> nothing {
   let payload: record = ($in | from json)
   let cmd: string = ($payload | get -o tool_input.command | default '')
   if ($cmd | is-empty) { exit 0 }
+  let sid: string = ($payload | get -o session_id | default '')
 
   let sl: string = (long-sleep $cmd)
   if not ($sl | is-empty) {
+    log-denial $log $sid 'nushell-law' 'blind-sleep' 'shell' $cmd
     print -e $"⛔ Reactive law: blind sleep ($sl) is FORBIDDEN — be event-driven instead: `job spawn` + `job send 0` + `job recv --timeout` — the timeout raises an error, wrap it in try/catch — or `watch` as an event stream. Full recipe: KB notes/reactive-jobs.md. Short sleeps below 10s remain legal as measured retry-gaps."
     exit 2
   }
@@ -69,6 +86,7 @@ def main []: string -> nothing {
   # fine inline; the moment a payload needs a second binding — or a paren ever
   # wraps a let — STOP and write a .nu script file instead.
   if ($cmd =~ '(?m)\(\s*let\b') {
+    log-denial $log $sid 'nushell-law' 'paren-let' 'shell' $cmd
     print -e "⛔ Paren-wrapped `let` law: `let` is a statement in Nushell — `(let x = ...)` is ALWAYS a parse error. THE fix: keep `let` at top level; the moment a `nu -c` payload needs a second binding, STOP and write a .nu script file (`nu scripts/x.nu`). Retry as a script."
     exit 2
   }

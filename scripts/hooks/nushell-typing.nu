@@ -10,6 +10,21 @@
 # (output_type_mismatch), so annotating turns nu-check into real static
 # checking.
 
+const DENIALS: path = '/Users/lattenero/.zcode/hooks/state/denials.tsv'
+
+# The denial ledger: ONE tab-separated line per deny (ts, session, hook, rule,
+# language, target), written right before the deny. It never moves the
+# verdict: a failed write is dropped and the deny goes out unchanged.
+def log-denial [log: path, sid: string, hook: string, rule: string, language: string, target: string]: nothing -> nothing {
+  try {
+    mkdir ($log | path dirname)
+    [(date now | format date '%FT%T%:z') $sid $hook $rule $language ($target | str replace -a "\t" ' ' | str replace -a "\n" ' ' | str replace -a "\r" ' ' | str substring 0..119)]
+    | str join "\t"
+    | $"($in)\n"
+    | save --append $log
+  } catch { }
+}
+
 def untyped-params [params: string]: nothing -> list<string> {
   $params
   | split row ','
@@ -96,18 +111,21 @@ def anon-record-shapes [src: string]: nothing -> list<string> {
   | each {|l| $l | str substring 0..100 }
 }
 
-def main []: string -> nothing {
+def main [--log: path = $DENIALS]: string -> nothing {
   let payload: record = ($in | from json)
   let ti: record = ($payload | get -o tool_input | default {})
   let file: string = ($ti | get -o file_path | default '')
   if not ($file =~ '\.nu$') { exit 0 }
   let body: string = (if ($payload | get -o tool_name | default '') == 'Write' { $ti | get -o content } else { $ti | get -o new_string } | default '')
   if ($body | is-empty) { exit 0 }
+  let sid: string = ($payload | get -o session_id | default '')
+  let lang: string = ($file | path parse | get extension)
 
   # DENY always: hyphenated variable (invalid in nu — hyphens are for
   # COMMANDS, not variables)
   let hyphenVars: list<string> = ($body | parse -r '(?m)^\s*(?:let|const|mut)\s+(?<n>[\w]+-[\w\-]*)\s*[=:]' | get -o n | default [])
   if not ($hyphenVars | is-empty) {
+    log-denial $log $sid 'nushell-typing' 'hyphenated-variable' $lang $file
     print -e $"⛔ Nushell law — hyphenated variables are INVALID: ($hyphenVars | str join ', '). Rename them camelCase: hyphens are for commands, not variables."
     exit 2
   }
@@ -115,6 +133,7 @@ def main []: string -> nothing {
   # DENY reactive: blind sleep >= 10s
   let sl: string = (long-sleep $body)
   if not ($sl | is-empty) {
+    log-denial $log $sid 'nushell-typing' 'blind-sleep' $lang $file
     print -e $"⛔ Reactive law — blind sleep ($sl) FORBIDDEN: be event-driven with `job spawn` + `job send 0` + `job recv --timeout` — the timeout raises and goes in try/catch — or `watch` as a stream. Recipe: KB notes/reactive-jobs.md. Sleeps <10s as measured retry-gaps are fine."
     exit 2
   }
@@ -124,6 +143,7 @@ def main []: string -> nothing {
   if not $openDef {
     let missingSig: list<string> = (defs-without-signature $body)
     if not ($missingSig | is-empty) {
+      log-denial $log $sid 'nushell-typing' 'def-without-signature' $lang $file
       print -e $"⛔ Typing law — defs WITHOUT an IO signature: ($missingSig | str join ', '). Add `]: type -> type`, e.g.: nothing -> nothing."
       exit 2
     }
@@ -134,6 +154,7 @@ def main []: string -> nothing {
       | flatten
       | uniq)
     if not ($badParams | is-empty) {
+      log-denial $log $sid 'nushell-typing' 'untyped-params' $lang $file
       print -e $"⛔ Typing law — params WITHOUT a type: ($badParams | str join ', '). Annotate `name: type`; bare --flags are bool, ok."
       exit 2
     }

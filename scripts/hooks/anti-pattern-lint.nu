@@ -18,6 +18,21 @@
 #   5. `(let ...)` → parse error (mirrors the Bash-side law)
 # Deny = exit 2 + stderr citing the anti-patterns-law entry. Never silent.
 
+const DENIALS: path = '/Users/lattenero/.zcode/hooks/state/denials.tsv'
+
+# The denial ledger: ONE tab-separated line per deny (ts, session, hook, rule,
+# language, target), written right before the deny. It never moves the
+# verdict: a failed write is dropped and the deny goes out unchanged.
+def log-denial [log: path, sid: string, hook: string, rule: string, language: string, target: string]: nothing -> nothing {
+    try {
+        mkdir ($log | path dirname)
+        [(date now | format date '%FT%T%:z') $sid $hook $rule $language ($target | str replace -a "\t" ' ' | str replace -a "\n" ' ' | str replace -a "\r" ' ' | str substring 0..119)]
+        | str join "\t"
+        | $"($in)\n"
+        | save --append $log
+    } catch { }
+}
+
 # Only these rules run; each carries its law citation + the Semgrep-style
 # severity (HIGH denies the write, MEDIUM/LOW warn and let it through).
 const RULES: list<record> = [
@@ -54,7 +69,7 @@ const RULES: list<record> = [
     }
 ]
 
-def main []: string -> nothing {
+def main [--log: path = $DENIALS]: string -> nothing {
     let payload: record = ($in | from json)
     let tool: string = ($payload | get -o tool_name | default '')
     if not ($tool in ["Edit" "Write"]) { exit 0 }
@@ -68,6 +83,8 @@ def main []: string -> nothing {
         $input | get -o content | default ''
     })
     if ($text | is-empty) { exit 0 }
+    let sid: string = ($payload | get -o session_id | default '')
+    let lang: string = ($path | str lowercase | path parse | get extension)
 
     # THE AST LAYER (the 22/11 plan's upgrade — tree-sitter-nu via
     # web-tree-sitter, zero native deps): the else-if chain detected at
@@ -95,6 +112,7 @@ def main []: string -> nothing {
         } else { [] })
         if not ($astChains | is-empty) {
             let lines: string = ($astChains | each {|c| $"  line ($c.line): ($c.text)" } | str join (char nl))
+            log-denial $log $sid 'anti-pattern-lint' 'dispatch-chain' $lang $path
             print -e $"⛔ anti-pattern dispatch-chain · AST · law entry 1 — the else-if chain is REAL SYNTAX, the chain must DIE not relocate. Classify once into a mode record + dispatch via a table of closures, the brain.nu pick-mode pattern:\n($lines)"
             exit 2
         }
@@ -112,6 +130,7 @@ def main []: string -> nothing {
             let count: string = ($hits | into string)
             let line: string = $"anti-pattern-lint · ($rule.id) · ($rule.severity) · ($count) hit\(s\) — ($rule.msg)"
             if $rule.severity == "HIGH" {
+                log-denial $log $sid 'anti-pattern-lint' $rule.id $lang $path
                 print -e $"⛔ ($line)"
                 exit 2
             } else {
