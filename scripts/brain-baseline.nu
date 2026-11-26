@@ -54,7 +54,9 @@ def print-definitions [parts: list<Part>, ledger: list<Ledger>, zone: string]: n
     print $'  write     a COMPLETED Edit/Write/MultiEdit part, by extension: ($exts)'
     $LANGS | each {|l| print $'  oracle    ($l.lang): a completed Bash step whose command matches /($l.oracle)/' }
     $MARKERS | group-by lang --to-table | rename lang markers | each {|g|
-        print $'  fails     ($g.lang): the output carries ($g.markers | each {|m| $"($m.kind) ($m.text | to nuon)" } | str join ' | ')'
+        # the escape character prints as <esc>: an invisible byte must not ride into a pasted table
+        let shown: string = ($g.markers | each {|m| $m.kind + ' "' + ($m.text | str replace -a (char --integer 27) '<esc>') + '"' } | str join ' | ')
+        print ('  fails     ' + $g.lang + ': the output carries ' + $shown)
     }
     print '  status    a failing run is `completed` with the failure inside state.output; `error` is the harness (cancelled, plan mode, a hook) and no exit code is stored'
     print $'  law       ($ledger | length) ledger lines, authoritative from its first line ($ledger | get -o 0.ts | default 'none'); before it, stored parts whose error STARTS as a hook line, by the rule substrings the three hooks carry today; shell counts as nu. ($retired) stored denials carry a rule no hook has today — not counted'
