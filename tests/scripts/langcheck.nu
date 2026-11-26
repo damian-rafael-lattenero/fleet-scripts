@@ -53,6 +53,12 @@ let content: Run = (fire $root $allow 'files')
 assert equal $content.exit_code 1 'files mode still fails'
 assert equal ($content.stdout | from json | get kind | uniq | sort) ['accent' 'words']
 
+put ($root | path join '.worktrees' 'fake' 'repo' 'es.md') 'por que no funciona el correo\n'
+let outside: Run = (do { ^$nu.current-exe $SCRIPT $root --allow $allow --json --mode all } | complete)
+assert equal ($outside.stdout | from json | get -o path | default [] | any {|p| $p | str contains '.worktrees' }) false 'a worktree is skipped by default'
+let inside: Run = (do { ^$nu.current-exe $SCRIPT $root --allow $allow --json --mode all --include-worktrees } | complete)
+assert equal ($inside.stdout | from json | get -o path | default [] | any {|p| $p | str contains '.worktrees' }) true '--include-worktrees scans the branch'
+
 rm ($root | path join 'spanish.md')
 rm ($root | path join 'accented.md')
 rm ($root | path join 'code.nu')

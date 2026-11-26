@@ -4,10 +4,12 @@
 # Walk the owned roots and report every file, line or basename that still says
 # Spanish. A file whose first three lines carry a `lang-ok:` pragma is skipped,
 # and so is any path under a prefix listed in the allowlist, with its reason.
+# Worktrees are skipped by default; --include-worktrees scans a branch before
+# it is merged (it also enables hidden entries, which is where .worktrees lives).
 #
 #   nu ~/Scripts/scripts/langcheck.nu ~/Projects ~/Scripts
 #   nu ~/Scripts/scripts/langcheck.nu ~/Projects/agent-brain --mode files
-#   nu ~/Scripts/scripts/langcheck.nu --json --limit 50
+#   nu ~/Scripts/scripts/langcheck.nu ~/Projects/.worktrees/repo --include-worktrees
 use ../lib/lang-detect.nu *
 
 const EXTS: list<string> = ['md' 'txt' 'kt' 'kts' 'nu' 'hs' 'ts' 'tsx' 'js' 'jsx' 'py' 'sh' 'sql' 'yaml' 'yml' 'json' 'toml' 'plist' 'cabal' 'tex' 'nix']
@@ -18,8 +20,8 @@ type Allow = record<prefix: string, reason: string>
 type Finding = record<path: string, line: int, kind: string, text: string>
 type Run = record<exit_code: int, stdout: string, stderr: string>
 
-def skipped? [path: string]: nothing -> bool {
-    $SKIP | any {|seg| $path | str contains $seg }
+def skipped? [path: string, skip: list<string>]: nothing -> bool {
+    $skip | any {|seg| $path | str contains $seg }
 }
 
 def ext-of [path: string]: nothing -> string {
@@ -58,21 +60,21 @@ def glob-args []: nothing -> list<string> {
     $EXTS | each {|e| $'--glob=*.($e)' }
 }
 
-def all-files [roots: list<string>]: nothing -> list<string> {
+def all-files [roots: list<string>, skip: list<string>, extra: list<string>]: nothing -> list<string> {
     let globs: list<string> = (glob-args)
     $roots | each {|root|
-        let run: Run = (^rg --files --no-messages ...$globs $root | complete)
+        let run: Run = (^rg --files --no-messages ...$globs ...$extra $root | complete)
         if $run.exit_code == 0 { $run.stdout | lines } else { [] }
-    } | flatten | where {|f| (not (skipped? $f)) and ((ext-of $f) in $EXTS) } | sort | uniq
+    } | flatten | where {|f| (not (skipped? $f $skip)) and ((ext-of $f) in $EXTS) } | sort | uniq
 }
 
-def content-candidates [roots: list<string>]: nothing -> list<string> {
+def content-candidates [roots: list<string>, skip: list<string>, extra: list<string>]: nothing -> list<string> {
     let coarse: string = (coarse-pattern)
     let globs: list<string> = (glob-args)
     $roots | each {|root|
-        let run: Run = (^rg -l --no-messages -e $coarse ...$globs $root | complete)
+        let run: Run = (^rg -l --no-messages -e $coarse ...$globs ...$extra $root | complete)
         if $run.exit_code == 0 { $run.stdout | lines } else { [] }
-    } | flatten | where {|f| not (skipped? $f) } | sort | uniq
+    } | flatten | where {|f| not (skipped? $f $skip) } | sort | uniq
 }
 
 def content-findings [files: list<string>]: nothing -> list<Finding> {
@@ -89,7 +91,7 @@ def content-findings [files: list<string>]: nothing -> list<Finding> {
     } | flatten
 }
 
-def main [...roots: string, --mode: string = 'all', --allow: path, --json, --limit: int = 1000]: nothing -> nothing {
+def main [...roots: string, --mode: string = 'all', --allow: path, --json, --limit: int = 1000, --include-worktrees]: nothing -> nothing {
     let home: string = $env.HOME
     if not ($mode in ['files' 'names' 'all']) {
         error make {msg: $"unknown --mode ($mode): use files, names or all"}
@@ -97,14 +99,16 @@ def main [...roots: string, --mode: string = 'all', --allow: path, --json, --lim
     let defaults: list<string> = [$'($home)/Projects' $'($home)/Scripts' $'($home)/evals']
     let chosen: list<string> = (if ($roots | is-empty) { $defaults } else { $roots })
     let effective: list<string> = ($chosen | path expand)
+    let skip: list<string> = (if $include_worktrees { $SKIP | where {|s| $s != '/.worktrees/' } } else { $SKIP })
+    let extra: list<string> = (if $include_worktrees { ['--hidden'] } else { [] })
     let allow_file: path = ($allow | default ($home | path join 'Scripts' 'langcheck-allow.tsv'))
     let allow_list: list<Allow> = (load-allow $allow_file)
 
-    let files: list<string> = (if $mode == 'files' { [] } else { all-files $effective })
+    let files: list<string> = (if $mode == 'files' { [] } else { all-files $effective $skip $extra })
     let names: list<Finding> = ($files
         | where {|f| (spanish-name? ($f | path basename)) and (not (allowed? $f $allow_list)) }
         | each {|f| {path: $f, line: 0, kind: 'name', text: ($f | path basename)} })
-    let content: list<Finding> = (if $mode == 'names' { [] } else { content-findings (content-candidates $effective) })
+    let content: list<Finding> = (if $mode == 'names' { [] } else { content-findings (content-candidates $effective $skip $extra) })
     let findings: list<Finding> = (($names | append $content)
         | where {|h| not (allowed? $h.path $allow_list) }
         | sort-by path line
