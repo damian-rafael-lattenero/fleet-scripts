@@ -99,14 +99,14 @@ def sleep-in-loop [src: string]: nothing -> bool {
 # THE TYPE-ALIAS LAW (owner, 22/11) as mechanics: a def signature or
 # binding inlining a DEEP ANONYMOUS record (3+ fields = 2+ commas inside
 # record<...>) should carry a `type` alias instead. Alias DEFINITIONS
-# (`type X = record<...>`) are the fix, not the crime — lines starting
-# with `type` are exempt. Single-line detection: multi-line record spans
-# pass (the tree-sitter-nu upgrade will see them).
+# (`type X = record<...>`, exported or not) are the fix, not the crime —
+# lines starting with `type` are exempt. Single-line detection: multi-line
+# record spans pass (the tree-sitter-nu upgrade will see them).
 def anon-record-shapes [src: string]: nothing -> list<string> {
   $src
   | lines
   | where {|l|
-      (not ($l | str trim | str starts-with 'type ')) and ($l =~ 'record<[^>,]+,[^>,]+,[^>]*>')
+      (not (($l | str trim | str replace -r '^export\s+' '') | str starts-with 'type ')) and ($l =~ 'record<[^>,]+,[^>,]+,[^>]*>')
     }
   | each {|l| $l | str substring 0..100 }
 }
