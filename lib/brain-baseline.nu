@@ -448,7 +448,7 @@ export def features-of [turn: Turn, requests: table]: nothing -> Features {
     let errs: int = ($s | where status == error | length)
     let edits: int = ($s | where tool in $EDIT_TOOLS | length)
     let asked: table = ($requests | where sid == $turn.sid and t >= ($turn.t0 - 60000) and t <= $turn.t1)
-    let real: table = ($asked | where {|m| ($m.txt | str starts-with 'Contexto de memoria') == false })
+    let real: table = ($asked | where {|m| ($m.txt | str starts-with 'Memory context') == false })
     let f5: record = (flags-of ($s | first 5) '5')
     let f10: record = (flags-of ($s | first 10) '10')
     let fa: record = (flags-of $s 'all')

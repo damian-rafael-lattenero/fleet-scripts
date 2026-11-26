@@ -241,7 +241,7 @@ const STEPS: table = [
 ]
 const REQUESTS: table = [
     {sid: sess_a, t: ($T0 - 30000), txt: 'fix the login'}
-    {sid: sess_a, t: ($T0 + 60000), txt: 'Contexto de memoria ...'}
+    {sid: sess_a, t: ($T0 + 60000), txt: 'Memory context ...'}
     {sid: sess_b, t: ($T2 - 600000), txt: 'look at the kt'}
 ]
 let rows: table = (replay-rows $seals $STEPS $REQUESTS)
