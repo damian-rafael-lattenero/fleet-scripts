@@ -4,10 +4,12 @@
 # every note: the template's headings in order, the one-sentence denotation on
 # top, the line cap — and every cited path ON DISK, each one relative to the
 # note that cites it (a citation nobody can open is how a KB written by a model
-# fails). The INDEX is the contract: an id it lists without a note is pending,
-# a note it does not list is a finding.
+# fails). With --mirror: every quotation on a line that names a mirror must be
+# in that mirror — a sentence the manual never said is the other way to fail.
+# The INDEX is the contract: an id it lists without a note is pending, a note
+# it does not list is a finding.
 #
-#   nu ~/Scripts/scripts/kb-check.nu <notes-dir> [--max-lines 120] [--json]
+#   nu ~/Scripts/scripts/kb-check.nu <notes-dir> [--max-lines 120] [--mirror <dir>] [--json]
 use ../lib/kb-check.nu *
 
 const PROJECTS: path = '/Users/lattenero/Projects'
@@ -15,10 +17,20 @@ const PROJECTS: path = '/Users/lattenero/Projects'
 # The folder's own documents — the shape, the map, the law — are not notes.
 const NOT_NOTES: list<string> = [_TEMPLATE.md INDEX.md README.md]
 
+# The mirrors under a folder: each the name a note cites it by and its whole text.
+def mirrors-under [root: path]: nothing -> list<Mirror> {
+    glob ($root | path join '*') | where {|p| ($p | path type) == 'dir' } | each {|p|
+        let files: list<string> = (glob ($p | path join '**' '*.md'))
+        let mirror: Mirror = {name: ($p | path basename | str lowercase), text: (flat ($files | each {|f| open --raw $f } | str join "\n"))}
+        $mirror
+    }
+}
+
 def main [
     dir: path                       # the folder of <id>.md and _TEMPLATE.md
     --max-lines: int = 120          # the cap the maintenance law states
     --projects: path = $PROJECTS    # where the other KBs live (haskell-kb/official/…)
+    --mirror: path = ''             # the mirrors' folder — a line that names one must quote it
     --json                          # the findings as JSON for a test or another script
 ]: nothing -> nothing {
     let template: path = ($dir | path join '_TEMPLATE.md')
@@ -32,12 +44,14 @@ def main [
     let index: string = (if ($indexPath | path exists) { open --raw $indexPath } else { '' })
     let listed: list<string> = (index-ids $index)
     let stems: list<string> = ($notes | each {|f| $f | path parse | get stem })
+    let mirrors: list<Mirror> = (if ($mirror | is-empty) { [] } else { mirrors-under $mirror })
 
     let found: list<Finding> = ($notes | each {|file|
         let text: string = (open --raw $file)
         let seen: Shape = (shape $text)
         let missing: list<string> = ($seen.cites | where {|c| not (rooted $c ($file | path dirname) $projects | path exists) })
-        findings ($file | path basename) $text $expected $max_lines $missing
+        let misquoted: list<string> = (misquotes $text $mirrors)
+        findings ($file | path basename) $text $expected $max_lines $missing $misquoted
     } | flatten)
     let unlisted: list<Finding> = ($notes | where {|f| not ((($f | path parse | get stem)) in $listed) } | each {|f| {note: ($f | path basename), problem: 'a note the INDEX does not list'} })
     let pending: list<string> = ($listed | where {|id| not ($id in $stems) })

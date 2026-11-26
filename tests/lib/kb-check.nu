@@ -1,7 +1,8 @@
 # kb-check.nu — the core of the notes check on literal texts: headings in
 # order and case, the lines outside code fences, the three families of a
 # citation (and only as code spans), where each is rooted, every finding the
-# law produces, the INDEX ids (the first cell only).
+# law produces, the INDEX ids (the first cell only), the quotations a note puts
+# in a mirror's mouth.
 use std/assert
 use ../../lib/kb-check.nu *
 
@@ -38,17 +39,34 @@ assert equal (rooted '../../official/lyah/c.md' '/n/notes/concepts' '/p') '/n/no
 assert equal (rooted '../laws/test/Canon/F.hs' '/n/notes/concepts' '/p') '/n/notes/concepts/../laws/test/Canon/F.hs'
 
 # 5. findings: a clean note breaks nothing; each law breaks on its own.
-assert equal (findings 'functor.md' $CLEAN $TEMPLATE 120 []) []
-let problems: list<string> = (findings 'functor.md' $CLEAN $TEMPLATE 3 ['../official/lyah/source_md/ch02.md'] | get problem)
+assert equal (findings 'functor.md' $CLEAN $TEMPLATE 120 [] []) []
+let problems: list<string> = (findings 'functor.md' $CLEAN $TEMPLATE 3 ['../official/lyah/source_md/ch02.md'] [] | get problem)
 assert equal $problems ["13 lines, the cap is 3" 'cites a missing path: ../official/lyah/source_md/ch02.md']
-assert equal (findings 'f.md' $SWAPPED $TEMPLATE 120 [] | get problem) ['headings differ from the template — The shape / It comes down to Haskell / The trap / Sources; found It comes down to Haskell / The shape / The trap / Sources']
+assert equal (findings 'f.md' $SWAPPED $TEMPLATE 120 [] [] | get problem) ['headings differ from the template — The shape / It comes down to Haskell / The trap / Sources; found It comes down to Haskell / The shape / The trap / Sources']
 # the case of a heading is law too
-assert equal (findings 'f.md' $LOWER $TEMPLATE 120 [] | get problem | length) 1
-assert equal (findings 'f.md' $NO_DENOTES $TEMPLATE 120 [] | get problem) ['no one-sentence denotation on top']
+assert equal (findings 'f.md' $LOWER $TEMPLATE 120 [] [] | get problem | length) 1
+assert equal (findings 'f.md' $NO_DENOTES $TEMPLATE 120 [] [] | get problem) ['no one-sentence denotation on top']
+assert equal (findings 'f.md' $CLEAN $TEMPLATE 120 [] ['the lazy brown fox jumps'] | get problem) ['quotes what the mirror does not say: the lazy brown fox jumps']
 
 # 6. INDEX ids: the first cell of a row, never the Canon column beside it.
 const INDEX: string = "| `category` | Category | H01 | `composition` | q |\n| `functor` | Functor | H02 | `functor` | q |\n\nFile names: `<id>.md` in this directory.\n"
 assert equal (index-ids $INDEX) [category functor]
 assert equal (index-ids '') []
 
-print 'lib/kb-check ok — headings, prose, three citation families, rooting, the findings, INDEX ids'
+# 7. quotations: the words of the long double-quoted spans of a line — markup,
+# quote marks, dashes and capitalisation are not what a quotation is checked
+# for; only a line that names a mirror makes a claim.
+assert equal (flat "<b>Solid</b> arrows—it’s “here”") 'solid arrows its here'
+# only a tag goes: an arrow or an operator between angle brackets is the manual's text
+assert equal (flat "a -> b (<*>) and x < y > z") 'a -> b (<*>) and x < y > z'
+assert equal (quotes-in "LYAH says \"the quick brown fox jumps\" and \"it *decides* what’s next: `f x`\".") ['the quick brown fox jumps' "it *decides* whats next: f x"]
+assert equal (quotes-in "a gap seed: \"a term, not a claim\" and `code \"inside\" here`") []
+assert equal (quotes-in "LYAH: \"the quick brown fox jumps ... over the very lazy dog now\".") ['the quick brown fox jumps' 'over the very lazy dog now']
+# an editorial bracket declares a change: the piece it ends is dropped, the rest is checked
+assert equal (quotes-in "LYAH: \"to section a function, only suppl[ies] a parameter on one side\".") ['a parameter on one side']
+let mirrors: list<Mirror> = [{name: 'lyah', text: (flat "The quick brown fox jumps.\nIt *decides* what’s next: `f x`.")}]
+assert equal (misquotes "LYAH says \"the quick brown fox jumps\" and \"it *decides* what’s next: `f x`\"." $mirrors) []
+assert equal (misquotes "LYAH says \"the lazy brown fox jumps\" and \"the quick brown fox jumps\"." $mirrors) ['the lazy brown fox jumps']
+assert equal (misquotes "No mirror is named: \"the lazy brown fox jumps\"." $mirrors) []
+
+print 'lib/kb-check ok — headings, prose, three citation families, rooting, the findings, INDEX ids, quotations'

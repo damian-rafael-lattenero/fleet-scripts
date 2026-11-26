@@ -1,7 +1,8 @@
 # kb-check.nu core — a notes folder's maintenance law as predicates over text:
 # the shape a template gives (headings, the denotation on top, the line cap),
-# the paths a note cites, the ids its INDEX lists. Everything here answers from
-# its arguments alone; the script asks the filesystem.
+# the paths a note cites, the quotations it puts in a mirror's mouth, the ids
+# its INDEX lists. Everything here answers from its arguments alone; the
+# script asks the filesystem.
 
 # A citation is a code span that starts as one of three families, each relative
 # to the note that cites it: this KB's mirror (`../../official/…`), this repo's
@@ -9,11 +10,17 @@
 const MINE: string = '^\.\./(.*/)?(official|laws)/'
 const OTHERS: string = '^[\w-]+-kb/official/'
 
+# The shortest span read as a quotation: below it a quoted word is a term, not a claim.
+const QUOTE_MIN: int = 20
+
 # What one note says about itself before the filesystem is asked.
 export type Shape = record<headings: list<string>, denotes: bool, cites: list<string>>
 
 # One broken law, readable.
 export type Finding = record<note: string, problem: string>
+
+# One mirror: the name a note cites it by (its folder, lowercased) and its whole text, flattened.
+export type Mirror = record<name: string, text: string>
 
 # The `## ` headings of a text, in order.
 export def headings [text: string]: nothing -> list<string> {
@@ -52,10 +59,61 @@ export def shape [text: string]: nothing -> Shape {
     $seen
 }
 
+# A text as one line for comparison. What a quotation is NOT checked for —
+# markup, quote marks, dashes, spacing, capitalisation — is dropped; what is
+# left is its words in their order.
+export def flat [text: string]: nothing -> string {
+    $text
+    | str replace -a -r '</?[a-zA-Z][^<>]{0,200}>' ''
+    | str replace -a '`' ''
+    | str replace -a '[' ''
+    | str replace -a ']' ''
+    | str replace -a '"' ''
+    | str replace -a "'" ''
+    | str replace -a '“' ''
+    | str replace -a '”' ''
+    | str replace -a '‘' ''
+    | str replace -a '’' ''
+    | str replace -a '—' ' '
+    | str replace -a '–' ' '
+    | str replace -a -r '\s+' ' '
+    | str trim
+    | str lowercase
+}
+
+# The quotations one prose line puts in a source's mouth: its double-quoted
+# spans, the long pieces only. An elision (`...`) splits a span; an editorial
+# bracket (`suppl[ies]`) declares a change, so the piece it ends is dropped
+# and the rest is still checked.
+export def quotes-in [line: string]: nothing -> list<string> {
+    $line | str replace -a '`' '' | split row '"' | enumerate | where {|t| ($t.index mod 2) == 1 } | get item
+    | each {|span| $span | split row '...' } | flatten
+    | each {|span|
+        let pieces: list<string> = ($span | split row -r '\[[^\]]*\]')
+        let kept: list<string> = (if ($pieces | length) > 1 { $pieces | skip 1 } else { $pieces })
+        $kept
+    }
+    | flatten
+    | each {|seg| flat $seg } | where {|seg| ($seg | str length) >= $QUOTE_MIN }
+}
+
+# The quotations a note puts in a mirror's mouth that the mirror does not say.
+# Only a line that names a mirror is read as a claim about it.
+export def misquotes [text: string, mirrors: list<Mirror>]: nothing -> list<string> {
+    prose $text
+    | each {|line|
+        let named: list<Mirror> = ($mirrors | where {|m| ($line | str lowercase) | str contains $m.name } )
+        let unheard: list<string> = (if ($named | is-empty) { [] } else { quotes-in $line | where {|q| not ($named | any {|m| $m.text | str contains $q }) } })
+        $unheard
+    }
+    | flatten
+}
+
 # The laws one note breaks, given the template's headings and the line cap;
-# `missing` is what the filesystem said about its cited paths. The headings
-# are compared in order and in case.
-export def findings [note: string, text: string, expected: list<string>, max_lines: int, missing: list<string>]: nothing -> list<Finding> {
+# `missing` is what the filesystem said about its cited paths and `misquoted`
+# what the mirrors said about its quotations. The headings are compared in
+# order and in case.
+export def findings [note: string, text: string, expected: list<string>, max_lines: int, missing: list<string>, misquoted: list<string>]: nothing -> list<Finding> {
     let seen: Shape = (shape $text)
     let count: int = ($text | lines | length)
     let found: string = ($seen.headings | str join ' / ')
@@ -63,7 +121,8 @@ export def findings [note: string, text: string, expected: list<string>, max_lin
     let no_denotation: list<Finding> = (if not $seen.denotes { [{note: $note, problem: 'no one-sentence denotation on top'}] } else { [] })
     let drifted: list<Finding> = (if $seen.headings != $expected { [{note: $note, problem: $"headings differ from the template — ($expected | str join ' / '); found ($found)"}] } else { [] })
     let broken: list<Finding> = ($missing | each {|p| {note: $note, problem: $"cites a missing path: ($p)"} })
-    [$too_long $no_denotation $drifted $broken] | flatten
+    let unheard: list<Finding> = ($misquoted | each {|q| {note: $note, problem: $"quotes what the mirror does not say: ($q | str substring 0..90)"} })
+    [$too_long $no_denotation $drifted $broken $unheard] | flatten
 }
 
 # The ids an INDEX lists: the first cell of each table row.
