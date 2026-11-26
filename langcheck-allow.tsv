@@ -88,3 +88,6 @@
 /Users/lattenero/Projects/zcode-bot-kotlin/docs/plan-denotational-engine.md	rule 6: quoted Spanish sample queries (evidence)
 # Eval INPUT — the owner's Spanish sample questions (restored by the owner's session 2026-11-26: they test the Spanish-question path, not corpus prose).
 /Users/lattenero/Projects/agent-brain/evals/suites/canon-recall.json	eval input: the 45 Spanish concept questions
+# Rule 6 and rule 3 — diff-ask fixture data and the stale generated bundle.
+/Users/lattenero/Projects/zcode-diff-ask/tests/lib-frag.test.mjs	rule 6: verbatim fixture data (two identical lines)
+/Users/lattenero/Projects/zcode-diff-ask/diff-ask/dist/dev.html	rule 3: stale generated bundle

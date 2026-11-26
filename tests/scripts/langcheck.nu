@@ -27,6 +27,7 @@ put ($root | path join 'spanish.md') 'por que chat_timeout_s no funcionaba y qui
 put ($root | path join 'accented.md') 'qué es una mónada y para qué sirve\n'
 put ($root | path join 'notes.txt') 'see paragraph para. 3 of the paper\n'
 put ($root | path join 'code.nu') '# este archivo devuelve la lista\nlet total: int = 1\n'
+put ($root | path join 'code.mjs') '// este archivo devuelve la lista\nconst total = 1;\n'
 put ($root | path join 'data.json') '{"mensaje": "hola"}\n'
 put ($root | path join 'hoja-de-ruta.md') 'clean text\n'
 put ($root | path join 'quoted.md') '<!-- lang-ok: verbatim quote -->\nqué es una mónada\n'
@@ -39,6 +40,7 @@ assert equal $out.exit_code 1 'exit 1 on findings'
 let found: list<string> = ($out.stdout | from json | select path kind | each {|f| $"($f.path | path basename): ($f.kind)" } | sort)
 assert equal $found [
     'accented.md: accent'
+    'code.mjs: words'
     'code.nu: words'
     'data.json: words'
     'hoja-de-ruta.md: name'
@@ -62,6 +64,7 @@ assert equal ($inside.stdout | from json | get -o path | default [] | any {|p| $
 rm ($root | path join 'spanish.md')
 rm ($root | path join 'accented.md')
 rm ($root | path join 'code.nu')
+rm ($root | path join 'code.mjs')
 rm ($root | path join 'data.json')
 rm ($root | path join 'hoja-de-ruta.md')
 let clean: Run = (fire $root $allow 'all')
@@ -70,4 +73,4 @@ assert equal $clean.exit_code 0 $"exit 0 when the tree is English: ($clean.stdou
 assert equal ($clean.stdout | from json) []
 
 rm -r -f $root
-print 'scripts/langcheck ok — 5 findings with exit 1, names/files modes, pragma and allowlist skipped, exit 0 when clean'
+print 'scripts/langcheck ok — 6 findings with exit 1, names/files modes, pragma and allowlist skipped, exit 0 when clean'

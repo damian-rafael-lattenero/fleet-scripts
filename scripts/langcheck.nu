@@ -12,7 +12,7 @@
 #   nu ~/Scripts/scripts/langcheck.nu ~/Projects/.worktrees/repo --include-worktrees
 use ../lib/lang-detect.nu *
 
-const EXTS: list<string> = ['md' 'txt' 'kt' 'kts' 'nu' 'hs' 'ts' 'tsx' 'js' 'jsx' 'py' 'sh' 'sql' 'yaml' 'yml' 'json' 'toml' 'plist' 'cabal' 'tex' 'nix']
+const EXTS: list<string> = ['md' 'txt' 'kt' 'kts' 'nu' 'hs' 'ts' 'tsx' 'js' 'jsx' 'mjs' 'cjs' 'css' 'scss' 'less' 'py' 'sh' 'sql' 'yaml' 'yml' 'json' 'toml' 'plist' 'cabal' 'tex' 'nix']
 
 const SKIP: list<string> = ['/node_modules/' '/build/' '/dist/' '/.gradle/' '/.kotlin/' '/official/' '/third-party/' '/vendor/' '/target/' '/.git/' '/Backups/' '/.worktrees/' '/evals/artifacts/' '/.nu-orphans-archive/' '/archive/']
 
