@@ -18,6 +18,7 @@
 /Users/lattenero/Projects/ZCode/third-party	upstream: vendored third-party licenses
 /Users/lattenero/Projects/ZCode/THIRD-PARTY-NOTICES.md	upstream: third-party notices (names)
 /Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/adapters/tests	upstream: byte-encoding fixtures
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/bootstrap/tests	upstream: byte fixtures and a Chinese comment
 /Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/core/src/runtime/helpers/runtime-reminders.ts	upstream: reply-language policy
 /Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/core/tests/edit-tool-contract.test.ts	upstream: test fixture
 /Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/core/tests/runtime-context-announcements.test.ts	upstream: test fixture
