@@ -1,9 +1,9 @@
+# lang-ok: test fixtures (the asserted strings are Spanish on purpose)
 # langcheck.nu — the gate end to end on a fixture tree built for the run: a
 # clean file passes, an accented file and an unaccented Spanish pair are found,
 # a Spanish basename is a name finding, a pragma and an allowlisted prefix are
 # skipped with their reason, and the exit flips 1 -> 0 when the fixture is
 # cleaned. Nothing touches a real repo.
-# lang-ok: test fixtures (the asserted strings are Spanish on purpose)
 use std/assert
 
 const SELF: path = (path self)

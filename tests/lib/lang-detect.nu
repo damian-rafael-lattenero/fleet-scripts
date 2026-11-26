@@ -1,7 +1,7 @@
+# lang-ok: test fixtures (the asserted strings are Spanish on purpose)
 # lang-detect.nu — the pure detector: an accent is Spanish; two univocal words
 # are Spanish even without accents; a basename from the sweep is Spanish; and
-# the lang-ok pragma is the only escape hatch.
-# lang-ok: test fixtures (the asserted strings are Spanish on purpose)
+# the pragma is the only escape hatch.
 use std/assert
 use ../../lib/lang-detect.nu *
 
