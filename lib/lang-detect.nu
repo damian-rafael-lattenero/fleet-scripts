@@ -25,7 +25,7 @@ export const NAME_WORDS: list<string> = [
     'migracion' 'incidente' 'robustez' 'foco' 'reencarnacion' 'hoja' 'ruta'
     'brujula' 'mapa' 'diccionario' 'ecosistema' 'pendiente' 'tarea' 'salida'
     'entrada' 'linea' 'columna' 'obtener' 'cargar' 'guardar' 'escribir'
-    'contar' 'corrida' 'adjuntos' 'huerfanas'
+    'contar' 'corrida' 'adjuntos' 'huerfanas' 'viaje'
 ]
 
 # A word with Unicode-aware boundaries, case-insensitive.
