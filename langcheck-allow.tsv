@@ -55,3 +55,33 @@
 /Users/lattenero/Projects/theory-kb/notes/category-theory/category-theory-and-ai.md	rule 6: author names in citations
 /Users/lattenero/Projects/theory-kb/notes/category-theory/monoidal-functor.md	rule 6: author names in citations
 /Users/lattenero/Projects/zcode-plugin-research.md	rule 6: verbatim ASR quote with the English rendering above
+# Rule 6 — bot fixtures, owner citations and load-bearing compat literals.
+/Users/lattenero/Projects/bot/tests	rule 6: fixtures and cited remarks ([translated] beside them)
+/Users/lattenero/Projects/bot/docs	rule 6: owner citations with the English rendering beside them
+/Users/lattenero/Projects/bot/src/zcode_bot/agent_live.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/attach.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/commands/handlers_system.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/commands/handlers_tasks.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/config.py	compat: live config keys and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/core.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/live_view.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/messages.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/reasoning.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/utils/formatting.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/utils/validation.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/verbosity.py	compat: live wire literals and cited remarks
+/Users/lattenero/Projects/bot/src/zcode_bot/workers.py	compat: live wire literals and cited remarks
+# Rule 6 — haskell-rules proper names and the CI_PERF citation.
+/Users/lattenero/Projects/haskell-rules-and-mcp/README.md	rule 6: the author's legal name
+/Users/lattenero/Projects/haskell-rules-and-mcp/docs/CI_PERF.md	rule 6: verbatim quote with the English rendering
+/Users/lattenero/Projects/haskell-rules-and-mcp/mcp-server-haskell/haskell-flows-mcp.cabal	rule 6: the author's legal name
+/Users/lattenero/Projects/haskell-rules-and-mcp/mcp-server-haskell/test-e2e/Fixtures/Baseline/baseline.cabal	rule 6: the author's legal name in a fixture
+# Rule 6 — zcode-bot-kotlin test fixtures and owner specs.
+/Users/lattenero/Projects/zcode-bot-kotlin/modules/channel/src/test	rule 6: fixture prose (sample model output, sample user prompts)
+/Users/lattenero/Projects/zcode-bot-kotlin/modules/daemon/src/test	rule 6: fixture prose and the spectator golden
+/Users/lattenero/Projects/zcode-bot-kotlin/modules/transport/src/test	rule 6: fixture prose
+/Users/lattenero/Projects/zcode-bot-kotlin/modules/contract-types/src/test	rule 6: fixture prose and the unicode-roundtrip case
+/Users/lattenero/Projects/zcode-bot-kotlin/docs/cmdfixes-owner-spec.md	rule 6: owner citations with the English rendering
+/Users/lattenero/Projects/zcode-bot-kotlin/docs/command-parity-plan.md	rule 6: owner citations
+/Users/lattenero/Projects/zcode-bot-kotlin/docs/livecard-owner-spec.md	rule 6: owner citations
+/Users/lattenero/Projects/zcode-bot-kotlin/docs/parity-and-engineering.md	rule 6: owner citations
