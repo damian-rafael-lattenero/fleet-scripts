@@ -43,7 +43,7 @@ put ($notes | path join 'README.md') 'the law itself, never a note'
 put ($root | path join 'kb' 'official' 'lyah' 'a.md') 'mirror'
 put ($projects | path join 'other-kb' 'official' 'b.md') 'mirror'
 put ($notes | path join 'good.md') (note 'good' "## The shape\nReads `../official/lyah/a.md` and `other-kb/official/b.md`.\n\n## Sources\n- x")
-put ($notes | path join 'late.md') (note 'late' $"## Sources\n- x\n($FILLER)## The shape\nReads `../official/lyah/none.md` and `laws/test/Canon/Late.hs`.")
+put ($notes | path join 'late.md') (note 'late' $"## Sources\n- x\n($FILLER)## The shape\nReads `../official/lyah/none.md` and `../laws/test/Canon/Late.hs`.")
 put ($notes | path join 'stray.md') (note 'stray' "## The shape\nNo citation here.\n\n## Sources\n- x")
 
 let out: Run = (fire $notes $projects 12 true)
@@ -52,8 +52,8 @@ assert equal $out.exit_code 1 'exit 1 on findings'
 let found: list<string> = ($out.stdout | from json | select note problem | each {|f| $"($f.note): ($f.problem)" } | sort)
 assert equal $found [
     'late.md: 13 lines, the cap is 12'
+    'late.md: cites a missing path: ../laws/test/Canon/Late.hs'
     'late.md: cites a missing path: ../official/lyah/none.md'
-    'late.md: cites a missing path: laws/test/Canon/Late.hs'
     'late.md: headings differ from the template — The shape / Sources; found Sources / The shape'
     'stray.md: a note the INDEX does not list'
 ]

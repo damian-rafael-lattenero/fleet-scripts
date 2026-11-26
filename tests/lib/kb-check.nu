@@ -28,13 +28,14 @@ const FENCED: string = "a\n```haskell\nb `../official/x/y.md`\n```\nc\n"
 assert equal (prose $FENCED) [a c]
 
 # 3. citations: the three families, as code spans, anchors dropped; the rest is not a citation.
-assert equal (cites-in "see `../official/lyah/a.md#fmap`, `laws/test/Canon/Functor.hs`, `haskell-kb/official/lyah/b.md` and `T?`, `fmap`, /commands/docs/x.md, `<mirror>/x.md`") [../official/lyah/a.md laws/test/Canon/Functor.hs haskell-kb/official/lyah/b.md]
+assert equal (cites-in "see `../official/lyah/a.md#fmap`, `../../official/lyah/c.md`, `laws/test/Canon/F.hs`, `../laws/test/Canon/Functor.hs`, `haskell-kb/official/lyah/b.md` and `T?`, `fmap`, official/x.md, /commands/docs/x.md, `<mirror>/x.md`") [../official/lyah/a.md ../../official/lyah/c.md ../laws/test/Canon/Functor.hs haskell-kb/official/lyah/b.md]
 assert equal (shape $FENCED).cites []
 assert equal (shape $CLEAN).cites [../official/lyah/source_md/ch02.md haskell-kb/official/typeclassopedia/typeclassopedia.md]
 
-# 4. rooted: another KB's mirror under the projects dir, the rest under the notes.
+# 4. rooted: another KB's mirror under the projects dir, the rest under the note's own folder.
 assert equal (rooted 'haskell-kb/official/lyah/b.md' '/n/concepts' '/p') '/p/haskell-kb/official/lyah/b.md'
-assert equal (rooted '../official/lyah/a.md' '/n/concepts' '/p') '/n/concepts/../official/lyah/a.md'
+assert equal (rooted '../../official/lyah/c.md' '/n/notes/concepts' '/p') '/n/notes/concepts/../../official/lyah/c.md'
+assert equal (rooted '../laws/test/Canon/F.hs' '/n/notes/concepts' '/p') '/n/notes/concepts/../laws/test/Canon/F.hs'
 
 # 5. findings: a clean note breaks nothing; each law breaks on its own.
 assert equal (findings 'functor.md' $CLEAN $TEMPLATE 120 []) []

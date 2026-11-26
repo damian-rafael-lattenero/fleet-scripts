@@ -3,9 +3,10 @@
 # the paths a note cites, the ids its INDEX lists. Everything here answers from
 # its arguments alone; the script asks the filesystem.
 
-# A citation is a code span that starts as one of three families: this KB's
-# mirror, this repo's laws, another KB's mirror.
-const MINE: string = '^(\.\./official|laws)/'
+# A citation is a code span that starts as one of three families, each relative
+# to the note that cites it: this KB's mirror (`../../official/…`), this repo's
+# laws (`../laws/…`), or another KB's mirror under the projects dir.
+const MINE: string = '^\.\./(.*/)?(official|laws)/'
 const OTHERS: string = '^[\w-]+-kb/official/'
 
 # What one note says about itself before the filesystem is asked.
@@ -36,7 +37,7 @@ export def cites-in [line: string]: nothing -> list<string> {
     | each {|span| $span | str replace -r '#.*$' '' }
 }
 
-# Where a cited path is rooted: another KB's mirror under the projects dir, the rest under the notes.
+# Where a cited path is rooted: another KB's mirror under the projects dir, the rest under the note's own folder.
 export def rooted [cite: string, notes: path, projects: path]: nothing -> path {
     let base: path = (if ($cite =~ $OTHERS) { $projects } else { $notes })
     $base | path join $cite

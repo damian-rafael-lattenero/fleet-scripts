@@ -2,9 +2,10 @@
 # kb-check.nu — a notes folder against its maintenance law, mechanically: the
 # father's half of a subagent review, and the check a mirror update owes. For
 # every note: the template's headings in order, the one-sentence denotation on
-# top, the line cap — and every cited path ON DISK (a citation nobody can open
-# is how a KB written by a model fails). The INDEX is the contract: an id it
-# lists without a note is pending, a note it does not list is a finding.
+# top, the line cap — and every cited path ON DISK, each one relative to the
+# note that cites it (a citation nobody can open is how a KB written by a model
+# fails). The INDEX is the contract: an id it lists without a note is pending,
+# a note it does not list is a finding.
 #
 #   nu ~/Scripts/scripts/kb-check.nu <notes-dir> [--max-lines 120] [--json]
 use ../lib/kb-check.nu *
@@ -35,7 +36,7 @@ def main [
     let found: list<Finding> = ($notes | each {|file|
         let text: string = (open --raw $file)
         let seen: Shape = (shape $text)
-        let missing: list<string> = ($seen.cites | where {|c| not (rooted $c $dir $projects | path exists) })
+        let missing: list<string> = ($seen.cites | where {|c| not (rooted $c ($file | path dirname) $projects | path exists) })
         findings ($file | path basename) $text $expected $max_lines $missing
     } | flatten)
     let unlisted: list<Finding> = ($notes | where {|f| not ((($f | path parse | get stem)) in $listed) } | each {|f| {note: ($f | path basename), problem: 'a note the INDEX does not list'} })
