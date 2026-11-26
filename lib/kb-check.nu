@@ -13,6 +13,9 @@ const OTHERS: string = '^[\w-]+-kb/official/'
 # The shortest span read as a quotation: below it a quoted word is a term, not a claim.
 const QUOTE_MIN: int = 20
 
+# The line that opens a block of its own: a list item or a heading.
+const OPENER: string = '^(-|\*|\d+\.|#+)\s'
+
 # What one note says about itself before the filesystem is asked.
 export type Shape = record<headings: list<string>, denotes: bool, cites: list<string>>
 
@@ -35,6 +38,21 @@ export def prose [text: string]: nothing -> list<string> {
         let next: record = {fence: ($acc.fence xor $edge), rows: $kept}
         $next
     } | get rows
+}
+
+# The prose as blocks, the unit a quotation may wrap in: a paragraph broken
+# over several lines is one block; a list item and a heading are each their own.
+export def blocks [text: string]: nothing -> list<string> {
+    prose $text | each {|l| $l | str trim } | str join "\n"
+    | split row "\n\n"
+    | each {|chunk| $chunk | str trim }
+    | where {|chunk| not ($chunk | is-empty) }
+    | each {|chunk|
+        let rows: list<string> = ($chunk | split row "\n")
+        let items: bool = (($rows | first) =~ $OPENER)
+        if $items { $rows | where {|r| not ($r | is-empty) } } else { [($rows | str join ' ')] }
+    }
+    | flatten
 }
 
 # The paths one prose line cites: its code spans of the three families, anchors dropped.
@@ -81,12 +99,12 @@ export def flat [text: string]: nothing -> string {
     | str lowercase
 }
 
-# The quotations one prose line puts in a source's mouth: its double-quoted
-# spans, the long pieces only. An elision (`...`) splits a span; an editorial
-# bracket (`suppl[ies]`) declares a change, so the piece it ends is dropped
-# and the rest is still checked.
-export def quotes-in [line: string]: nothing -> list<string> {
-    $line | str replace -a '`' '' | split row '"' | enumerate | where {|t| ($t.index mod 2) == 1 } | get item
+# The quotations one block of prose puts in a source's mouth: its
+# double-quoted spans, the long pieces only. An elision (`...`) splits a span;
+# an editorial bracket (`suppl[ies]`) declares a change, so the piece it ends
+# is dropped and the rest is still checked.
+export def quotes-in [block: string]: nothing -> list<string> {
+    $block | str replace -a '`' '' | split row '"' | enumerate | where {|t| ($t.index mod 2) == 1 } | get item
     | each {|span| $span | split row '...' } | flatten
     | each {|span|
         let pieces: list<string> = ($span | split row -r '\[[^\]]*\]')
@@ -98,12 +116,12 @@ export def quotes-in [line: string]: nothing -> list<string> {
 }
 
 # The quotations a note puts in a mirror's mouth that the mirror does not say.
-# Only a line that names a mirror is read as a claim about it.
+# Only a block that names a mirror is read as a claim about it.
 export def misquotes [text: string, mirrors: list<Mirror>]: nothing -> list<string> {
-    prose $text
-    | each {|line|
-        let named: list<Mirror> = ($mirrors | where {|m| ($line | str lowercase) | str contains $m.name } )
-        let unheard: list<string> = (if ($named | is-empty) { [] } else { quotes-in $line | where {|q| not ($named | any {|m| $m.text | str contains $q }) } })
+    blocks $text
+    | each {|block|
+        let named: list<Mirror> = ($mirrors | where {|m| ($block | str lowercase) | str contains $m.name } )
+        let unheard: list<string> = (if ($named | is-empty) { [] } else { quotes-in $block | where {|q| not ($named | any {|m| $m.text | str contains $q }) } })
         $unheard
     }
     | flatten

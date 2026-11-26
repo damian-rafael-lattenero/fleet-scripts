@@ -2,7 +2,7 @@
 # order and case, the lines outside code fences, the three families of a
 # citation (and only as code spans), where each is rooted, every finding the
 # law produces, the INDEX ids (the first cell only), the quotations a note puts
-# in a mirror's mouth.
+# in a mirror's mouth and the block they may wrap in.
 use std/assert
 use ../../lib/kb-check.nu *
 
@@ -53,9 +53,9 @@ const INDEX: string = "| `category` | Category | H01 | `composition` | q |\n| `f
 assert equal (index-ids $INDEX) [category functor]
 assert equal (index-ids '') []
 
-# 7. quotations: the words of the long double-quoted spans of a line — markup,
+# 7. quotations: the words of the long double-quoted spans of a block — markup,
 # quote marks, dashes and capitalisation are not what a quotation is checked
-# for; only a line that names a mirror makes a claim.
+# for; only a block that names a mirror makes a claim.
 assert equal (flat "<b>Solid</b> arrows—it’s “here”") 'solid arrows its here'
 # only a tag goes: an arrow or an operator between angle brackets is the manual's text
 assert equal (flat "a -> b (<*>) and x < y > z") 'a -> b (<*>) and x < y > z'
@@ -69,4 +69,12 @@ assert equal (misquotes "LYAH says \"the quick brown fox jumps\" and \"it *decid
 assert equal (misquotes "LYAH says \"the lazy brown fox jumps\" and \"the quick brown fox jumps\"." $mirrors) ['the lazy brown fox jumps']
 assert equal (misquotes "No mirror is named: \"the lazy brown fox jumps\"." $mirrors) []
 
-print 'lib/kb-check ok — headings, prose, three citation families, rooting, the findings, INDEX ids, quotations'
+# 8. blocks: a paragraph wrapped over several lines is one, a list item and a
+# heading are each their own — a quotation may wrap with its paragraph.
+const WRAPPED: string = "# T\n\nLYAH asks: \"when we have a\nfunction of type\" (LYAH).\n\n- \"mapping the identity function over every item\" (Typeclassopedia)\n- next item\n## Sources\n"
+assert equal (blocks $WRAPPED) ['# T' 'LYAH asks: "when we have a function of type" (LYAH).' '- "mapping the identity function over every item" (Typeclassopedia)' '- next item' '## Sources']
+let wrapped: list<Mirror> = [{name: 'lyah', text: (flat 'When we have a function of type `a -> b`.')}]
+assert equal (misquotes "LYAH asks: \"when we have a\nfunction of type\" (LYAH)." $wrapped) []
+assert equal (misquotes "LYAH asks: \"when we hold a\nfunction of type\" (LYAH)." $wrapped) ['when we hold a function of type']
+
+print 'lib/kb-check ok — headings, prose, blocks, three citation families, rooting, the findings, INDEX ids, quotations'

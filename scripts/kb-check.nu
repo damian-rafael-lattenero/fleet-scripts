@@ -4,12 +4,15 @@
 # every note: the template's headings in order, the one-sentence denotation on
 # top, the line cap — and every cited path ON DISK, each one relative to the
 # note that cites it (a citation nobody can open is how a KB written by a model
-# fails). With --mirror: every quotation on a line that names a mirror must be
+# fails). With --mirror: every quotation in a block that names a mirror must be
 # in that mirror — a sentence the manual never said is the other way to fail.
 # The INDEX is the contract: an id it lists without a note is pending, a note
 # it does not list is a finding.
 #
 #   nu ~/Scripts/scripts/kb-check.nu <notes-dir> [--max-lines 120] [--mirror <dir>] [--json]
+#
+# A worktree sits away from the mirror, so `../../official/` resolves nowhere
+# from it: --as-if <real notes dir> reads the notes as if they were merged.
 use ../lib/kb-check.nu *
 
 const PROJECTS: path = '/Users/lattenero/Projects'
@@ -30,7 +33,8 @@ def main [
     dir: path                       # the folder of <id>.md and _TEMPLATE.md
     --max-lines: int = 120          # the cap the maintenance law states
     --projects: path = $PROJECTS    # where the other KBs live (haskell-kb/official/…)
-    --mirror: path = ''             # the mirrors' folder — a line that names one must quote it
+    --mirror: path = ''             # the mirrors' folder — a block that names one must quote it
+    --as-if: path = ''              # the folder the notes will live in once merged
     --json                          # the findings as JSON for a test or another script
 ]: nothing -> nothing {
     let template: path = ($dir | path join '_TEMPLATE.md')
@@ -38,6 +42,7 @@ def main [
         print -e $"kb-check: no _TEMPLATE.md in ($dir)"
         exit 2
     }
+    let home: path = (if ($as_if | is-empty) { $dir } else { $as_if })
     let expected: list<string> = (headings (open --raw $template))
     let notes: list<string> = (glob ($dir | path join '*.md') | where {|f| not (($f | path basename) in $NOT_NOTES) } | sort)
     let indexPath: path = ($dir | path join 'INDEX.md')
@@ -49,7 +54,7 @@ def main [
     let found: list<Finding> = ($notes | each {|file|
         let text: string = (open --raw $file)
         let seen: Shape = (shape $text)
-        let missing: list<string> = ($seen.cites | where {|c| not (rooted $c ($file | path dirname) $projects | path exists) })
+        let missing: list<string> = ($seen.cites | where {|c| not (rooted $c $home $projects | path exists) })
         let misquoted: list<string> = (misquotes $text $mirrors)
         findings ($file | path basename) $text $expected $max_lines $missing $misquoted
     } | flatten)

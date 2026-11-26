@@ -2,7 +2,9 @@
 # the template is read as the law, a clean note passes, each break shows as its
 # own finding (the cap, the headings, a citation that is not on disk, a note
 # outside the INDEX, a quotation the mirror never said) and the exit is 1; an
-# INDEX id without a note is pending, not a finding. Nothing touches a real KB.
+# INDEX id without a note is pending, not a finding. A copy of the notes away
+# from the mirror fails, and passes read --as-if it were merged. Nothing
+# touches a real KB.
 # covers: /Users/lattenero/Scripts/scripts/kb-check.nu
 use std/assert
 
@@ -73,5 +75,16 @@ assert equal $clean.exit_code 0 $"exit 0 when every note keeps its law: ($clean.
 assert equal ($clean.stdout | str contains '2 notes · 0 findings') true
 assert equal ($clean.stdout | str contains 'every note keeps its law') true
 
+# a worktree sits away from the mirror: --as-if reads the notes from the folder they will live in
+let away: path = ($root | path join 'elsewhere' 'notes')
+put ($away | path join '_TEMPLATE.md') $TEMPLATE
+put ($away | path join 'INDEX.md') "| `good` | Good | H01 |\n"
+put ($away | path join 'good.md') (note 'good' "## The shape\nReads `../official/lyah/a.md`.\n\n## Sources\n- x")
+let lost: Run = (do { ^$nu.current-exe $SCRIPT $away --json --projects $projects --mirror $mirror --max-lines 12 } | complete)
+assert equal ($lost.stdout | from json | get problem) ['cites a missing path: ../official/lyah/a.md']
+let home: Run = (do { ^$nu.current-exe $SCRIPT $away --json --projects $projects --mirror $mirror --max-lines 12 --as-if $notes } | complete)
+assert equal ($home.stderr | str trim) ''
+assert equal ($home.stdout | from json) []
+
 rm -r -f $root
-print 'scripts/kb-check ok — the template as law, six findings with exit 1, pending ≠ finding, exit 0 when clean'
+print 'scripts/kb-check ok — the template as law, six findings with exit 1, pending ≠ finding, exit 0 when clean, a worktree read --as-if'
