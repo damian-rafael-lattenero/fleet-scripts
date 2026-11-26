@@ -98,3 +98,4 @@
 /Users/lattenero/Scripts/tests/scripts/rag-english-check.nu	detector input: Spanish word lists
 # Rule 6 — diff-ask fixture text.
 /Users/lattenero/Projects/zcode-diff-ask/tests/lib-merge.test.mjs	rule 6: word-range fixture with Spanish sample text
+/Users/lattenero/Projects/zcode-diff-ask/tests/lib-frag.test.mjs	rule 6: fixture strings (Hola Mundo, línea igual)
