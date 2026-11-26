@@ -42,8 +42,8 @@ export type Tally = record<lang: string, week: string, writes: int, oracle_runs:
 # One ISO week of the grid: its label and its Monday.
 export type Week = record<week: string, monday: string>
 
-# One cell of the language leg.
-export type Cell = record<week: string, monday: string, lang: string, writes: int, oracle_runs: int, oracle_fails: int, law_denials: int, denials_per_1000_writes: float>
+# One cell of the language leg (the ratio is null where no writes divide it).
+export type Cell = record<week: string, monday: string, lang: string, writes: int, oracle_runs: int, oracle_fails: int, law_denials: int, denials_per_1000_writes: oneof<float, nothing>>
 
 # An oracle is a COMMAND: it stands right after a command separator, optional
 # env assignments and an optional directory (`cd x && ./gradlew`). Reading
@@ -252,7 +252,7 @@ export def sum-tallies [tallies: list<Tally>]: nothing -> table {
 
 # Law denials per 1,000 writes: 0 where nothing happened, null where there
 # were denials but no writes to divide by.
-def per-1000 [denials: int, writes: int]: nothing -> float {
+def per-1000 [denials: int, writes: int]: nothing -> any {
     if $writes == 0 { return (if $denials == 0 { 0.0 } else { null }) }
     ((($denials * 1000.0 / $writes) * 10.0 | math round) / 10.0)
 }
@@ -293,7 +293,8 @@ export type Step = record<t: int, tool: string, status: string, path: string, cm
 export type Turn = record<sid: string, t0: int, t1: int, reason: string, steps: list<Step>>
 
 # One turn's features: measured facts plus the flags at three horizons.
-export type Features = record<sid: string, reason: string, n: int, dur_min: float, stalled_min: float, files: int, max_per_file: int, errs: int, edits: int, request: string, reedit_5: bool, sprawl_5: bool, redloop_5: bool, errrate_5: bool, readheavy_5: bool, agent_5: bool, late_5: bool, any_5: bool, reedit_10: bool, sprawl_10: bool, redloop_10: bool, errrate_10: bool, readheavy_10: bool, agent_10: bool, late_10: bool, any_10: bool, reedit_all: bool, sprawl_all: bool, redloop_all: bool, errrate_all: bool, readheavy_all: bool, agent_all: bool, late_all: bool, nocheck_all: bool, any_all: bool>
+# dur_min is null for a session's first seal: no previous seal, no duration.
+export type Features = record<sid: string, reason: string, n: int, dur_min: oneof<float, nothing>, stalled_min: float, files: int, max_per_file: int, errs: int, edits: int, request: string, reedit_5: bool, sprawl_5: bool, redloop_5: bool, errrate_5: bool, readheavy_5: bool, agent_5: bool, late_5: bool, any_5: bool, reedit_10: bool, sprawl_10: bool, redloop_10: bool, errrate_10: bool, readheavy_10: bool, agent_10: bool, late_10: bool, any_10: bool, reedit_all: bool, sprawl_all: bool, redloop_all: bool, errrate_all: bool, readheavy_all: bool, agent_all: bool, late_all: bool, nocheck_all: bool, any_all: bool>
 
 # The discrimination of one signal at one horizon.
 export type Metric = record<signal: string, at: string, flagged: int, cancelled_in_flagged: int, precision_pct: float, lift: float, recall_pct: float, coverage_pct: float>
@@ -530,7 +531,7 @@ export def population-table [rows: table]: nothing -> table {
 export def sample-line [pair: record<index: int, item: Features>]: nothing -> string {
     let row: Features = $pair.item
     let tag: int = ($pair.index / 4 | math floor)
-    let head: string = $"[($tag)] n=($row.n) files=($row.files) maxreedit=($row.max_per_file) errs=($row.errs) min=($row.dur_min) · ($row.sid | str substring 0..13)"
+    let head: string = $"[($tag)] n=($row.n) files=($row.files) maxreedit=($row.max_per_file) errs=($row.errs) min=($row.dur_min | default '?') · ($row.sid | str substring 0..13)"
     $"($head)\n      ($row.request | str substring 0..170)"
 }
 

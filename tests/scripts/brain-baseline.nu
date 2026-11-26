@@ -29,11 +29,16 @@ def tool [id: string, sid: string, t: int, name: string, status: string, input: 
     row 'part' $id 'm1' $sid $t {type: 'tool', tool: $name, state: {status: $status, input: $input, output: $output, error: $err}}
 }
 
-# The language grid as the script renders it: one record per table line.
+# The language curves as the script renders them: one record per table line,
+# the language taken from the curve's own title line above it.
 def cells [out: string]: nothing -> table {
-    $out | lines
-    | each {|l| $l | parse -r '│\s*(?<week>\d{4}-W\d{2})\s*│\s*(?<monday>[\d-]+)\s*│\s*(?<lang>\w+)\s*│\s*(?<writes>\d+)\s*│\s*(?<runs>\d+)\s*│\s*(?<fails>\d+)\s*│\s*(?<denials>\d+)\s*│\s*(?<per>[\d.]+)\s*│' }
-    | flatten
+    let rows: table = ($out | lines | reduce --fold {lang: '', rows: []} {|line, acc|
+        let title: string = ($line | parse -r '^(?<lang>\w+) — files \[' | get -o 0.lang | default '')
+        let lang: string = (if ($title | is-empty) { $acc.lang } else { $title })
+        let hits: table = ($line | parse -r '\s*(?<week>\d{4}-W\d{2})\s*│\s*(?<monday>[\d-]+)\s*│\s*(?<writes>\d+)\s*│\s*(?<runs>\d+)\s*│\s*(?<fails>\d+)\s*│\s*(?<denials>\d+)\s*│\s*(?<per>[\d.]+)\s*$')
+        {lang: $lang, rows: ($acc.rows | append ($hits | each {|h| $h | insert lang $lang }))}
+    } | get rows)
+    $rows
 }
 
 # One cell of the rendered grid, by week and language.
@@ -86,9 +91,10 @@ let statements: string = ([
     (tool 'p14' 's1' ($prev + 5000) 'Bash' 'error' {command: 'x'} '' $BLIND)
     # a week no hook had been born in: nothing but noise
     (tool 'p15' 's1' $older 'Bash' 'completed' {command: 'cat x.nu'} '' '')
-    # the rumbo fixture: two read-only steps inside one cancelled turn, and its request
-    (tool 'p16' 'sess_r' ($seal + 300000) 'Read' 'completed' {file_path: '/g.kt'} '' '')
-    (tool 'p17' 'sess_r' ($seal + 600000) 'Glob' 'completed' {pattern: '**/*.kt'} '' '')
+    # the rumbo fixture: a session's FIRST seal, cancelled, with its two read-only
+    # steps and its request — the turn has no previous seal, so no duration
+    (tool 'p16' 'sess_r' ($seal - 600000) 'Read' 'completed' {file_path: '/g.kt'} '' '')
+    (tool 'p17' 'sess_r' ($seal - 300000) 'Glob' 'completed' {pattern: '**/*.kt'} '' '')
     (row 'message' 'm1' '' 'sess_r' ($seal - 60000) {role: 'user'})
     (row 'part' 't1' 'm1' 'sess_r' ($seal - 60000) {type: 'text', text: 'do the thing'})
 ] | str join (char nl))
@@ -108,8 +114,8 @@ $sql | ^sqlite3 $db
     ((iso ($cur + 10800_000)) + "\ts1\tnushell-law\tblind-sleep\tshell\tprint 1")
 ] | str join (char nl)) | save --force $ledgerPath
 ([
-    (seal-line $seal 'success')
-    (seal-line ($seal + 1800_000) 'cancelled')
+    (seal-line $seal 'cancelled')
+    (seal-line ($seal + 1800_000) 'success')
 ] | str join (char nl)) | save --force $logPath
 
 let res: record = (do { ^$nu.current-exe $script --db $db --log $logPath --denials $ledgerPath --weeks 3 --zone '+00:00' } | complete)
@@ -144,6 +150,7 @@ assert str contains $out 'sealed turns in the log: 2 · sessions: 1 · tool step
 assert str contains $out 'turns matched to real steps: 1 · cancelled 1 = 100.0 in 100 · success 0'
 assert str contains $out 'do the thing'
 assert str contains $out '│ cancelled │' "the populations name their reason"
+assert str contains $out 'min=? · sess_r' "a turn with no duration says so instead of counting from the epoch"
 
 # 4. read-only by construction: the one sqlite call is the readonly one, and
 #    nothing in the script writes, moves or removes a file.

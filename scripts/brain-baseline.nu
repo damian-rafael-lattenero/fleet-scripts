@@ -14,10 +14,10 @@ const DB: string = '/Users/lattenero/.zcode/cli/db/db.sqlite'
 const LOG: string = '/Users/lattenero/.zcode/bot-kotlin/logs/launchd.out.log'
 const DENIALS: string = '/Users/lattenero/.zcode/hooks/state/denials.tsv'
 
-# The render laws (session-find.nu): thin tables. Colors go only with an
+# The render laws: compact tables, one line per row. Colors go only with an
 # explicit strip (measured 0.117.0: an empty color_config keeps them), so the
 # numbers paste clean anywhere.
-$env.config.table.mode = 'thin'
+$env.config.table.mode = 'compact'
 
 # A rendered table, printed without colors.
 def plain []: string -> nothing {
@@ -72,11 +72,16 @@ def main [
     let weeks: list<Week> = (recent-weeks $nowMs $zone $weeks)
 
     # ── 1. language ────────────────────────────────────────────────────────
+    # one curve per language: its eight weeks, side by side
     let sinceMs: int = ($nowMs - ($weeks | length) * 7 * 86400_000)
     let parts: list<Part> = (query $db (parts-query $sinceMs))
     let ledger: list<Ledger> = (ledger-rows (read-text $denials))
+    let cells: table = (language-table (tallies-of $parts $ledger $zone) $weeks)
     print $"== 1. LANGUAGE — ($weeks | length) ISO weeks · ($parts | length) tool parts · ($ledger | length) ledger lines =="
-    language-table (tallies-of $parts $ledger $zone) $weeks | table --index false --width 150 | plain
+    $LANGS | each {|lang|
+        print $"\n($lang.lang) — files [($lang.exts | str join ' ')]"
+        $cells | where lang == $lang.lang | reject lang | table --index false --width 150 | plain
+    }
     print-definitions $parts $ledger $zone
 
     # ── 2. rumbo ───────────────────────────────────────────────────────────

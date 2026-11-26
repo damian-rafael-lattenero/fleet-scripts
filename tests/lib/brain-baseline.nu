@@ -248,6 +248,10 @@ assert equal ($rows | length) 2 "the first turn of sess_a matched no step"
 let killed: Features = ($rows | where reason == cancelled | get 0)
 assert equal ($killed | select reason n files max_per_file errs edits dur_min stalled_min request reedit_5 redloop_5 any_5 reedit_all redloop_all any_all nocheck_all) {reason: 'cancelled', n: 6, files: 1, max_per_file: 3, errs: 2, edits: 3, dur_min: 30.0, stalled_min: 9.0, request: 'fix the login', reedit_5: true, redloop_5: false, any_5: true, reedit_all: true, redloop_all: true, any_all: true, nocheck_all: true}
 assert equal ($rows | where reason == success | get 0.dur_min) null
+# ...and a turn without a duration still reads through every table it reaches
+let first: Features = ($rows | where reason == success | get 0)
+assert equal (sample-line {index: 4, item: $first}) "[1] n=2 files=0 maxreedit=0 errs=0 min=? · sess_b\n      look at the kt"
+assert equal (cause-of $first) 'b. quick stop: 5 steps or less'
 assert equal (cause-of $killed) 'd. middle: 6 to 50 steps'
 
 # 12. metric-of: precision, lift against the base rate, recall, coverage; and
