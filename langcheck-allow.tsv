@@ -91,3 +91,10 @@
 # Rule 6 and rule 3 — diff-ask fixture data and the stale generated bundle.
 /Users/lattenero/Projects/zcode-diff-ask/tests/lib-frag.test.mjs	rule 6: verbatim fixture data (two identical lines)
 /Users/lattenero/Projects/zcode-diff-ask/diff-ask/dist/dev.html	rule 3: stale generated bundle
+# Rule 5 — the new English checkers carry the Spanish word lists (owner session, 2026-11-26).
+/Users/lattenero/Scripts/scripts/translation-check.nu	detector input: Spanish word lists
+/Users/lattenero/Scripts/tests/scripts/translation-check.nu	detector input: Spanish word lists
+/Users/lattenero/Scripts/scripts/rag-english-check.nu	detector input: Spanish word lists
+/Users/lattenero/Scripts/tests/scripts/rag-english-check.nu	detector input: Spanish word lists
+# Rule 6 — diff-ask fixture text.
+/Users/lattenero/Projects/zcode-diff-ask/tests/lib-merge.test.mjs	rule 6: word-range fixture with Spanish sample text
