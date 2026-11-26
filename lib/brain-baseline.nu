@@ -1,3 +1,4 @@
+# lang-ok: historical denial spellings (rule 6 — the ledger keeps Spanish-era lines)
 # brain-baseline.nu core — the "before" numbers of the denotational-engine
 # plan, as data. Two pure legs; the script keeps the effects (the sqlite
 # reads, the daemon log, the denial ledger, the printing).

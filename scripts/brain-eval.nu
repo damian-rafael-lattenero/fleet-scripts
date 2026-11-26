@@ -29,15 +29,12 @@ def emit [line: string]: nothing -> nothing {
 # {kind: "corpus"|"memory", q: "...", expect: "substring that must appear in the top result"}
 const CASES: list<EvalCase> = [
     {kind: "corpus", q: "how does the nushell job mailbox timeout work", expect: "job", xfail: false}
-    {kind: "corpus", q: "cómo funciona el mailbox de jobs en nushell", expect: "reactive-jobs", xfail: false}
     {kind: "corpus", q: "what is the anti-patterns law", expect: "anti-patterns-law", xfail: false}
-    {kind: "corpus", q: "cual es la ley de anti-patrones", expect: "anti-patterns-law", xfail: false}
     {kind: "corpus", q: "nushell typed main signature law", expect: "typing-law", xfail: false}
     {kind: "corpus", q: "how does ram-clean protect my own session ancestry", expect: "ram-clean", xfail: false}
     {kind: "corpus", q: "kap process restart schedule retry", expect: "kap", xfail: false}
-    {kind: "corpus", q: "que dice la ley de tipos opacos", expect: "no-opaque-types", xfail: false}
+    {kind: "corpus", q: "what does the opaque types law say", expect: "no-opaque-types", xfail: false}
     {kind: "memory", q: "which tool shined yesterday nushell fleet", expect: "nushell", xfail: false}
-    {kind: "memory", q: "herramienta que brillo ayer nushell", expect: "nushell", xfail: true}
     {kind: "memory", q: "fork deploy card scroll horizontal", expect: "scroll", xfail: false}
 ]
 

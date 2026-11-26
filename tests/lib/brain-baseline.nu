@@ -1,3 +1,4 @@
+# lang-ok: historical denial spellings (rule 6 — the ledger keeps Spanish-era lines)
 # brain-baseline.nu — the pure core of the baseline on literal fixtures: the
 # language leg (whose file, which command runs which oracle, how a denial is
 # told apart from a harness error, the week grid, the store-to-ledger
