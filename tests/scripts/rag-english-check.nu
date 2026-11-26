@@ -55,6 +55,18 @@ def main []: nothing -> nothing {
   assert ($green.exit_code == 0) 'check exits 0 when only a code file carries Spanish'
   assert ($green.stdout =~ 'ENGLISH CHECK: PASS') 'the pass says the store reads English'
 
+  # Memories mode: an English row quoting a Spanish label passes; a Spanish
+  # prose memory (eight stopwords) fails.
+  write-fixture [
+    (row 'mem/1' 'The user asks for the events button and its label reads eventos-del-ano in the product; the row itself is English prose.')
+    (row 'mem/2' 'qué es este registro del store que tiene las palabras muy comunes que del las los para con una como más pero muy sin sobre también')
+  ]
+  let memRed: any = (nu $SCRIPT $FIXTURE --memories --check --out /tmp/rag-english-check-out.tsv | complete)
+  assert ($memRed.exit_code == 1) 'memories mode fails a Spanish prose memory'
+  write-fixture [(row 'mem/1' 'The user asks for the events button and its label reads eventos-del-ano in the product; the row itself is English prose.')]
+  let memGreen: any = (nu $SCRIPT $FIXTURE --memories --check --out /tmp/rag-english-check-out.tsv | complete)
+  assert ($memGreen.exit_code == 0) 'memories mode passes an English row quoting a Spanish label'
+
   print 'rag-english-check: all verdicts and both gate outcomes verified.'
 }
 

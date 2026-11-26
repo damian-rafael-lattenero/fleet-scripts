@@ -45,7 +45,7 @@ const VERDICT: list<string> = ['noprose' 'noprose' 'english' 'english' 'english'
 const HOME: string = '/Users/lattenero/Projects/'
 
 type Doc = record<id: int, source: string, uri: string, bytes: int, sample: string>
-type Judged = record<source: string, uri: string, bytes: int, lang: string, sample: string>
+type Judged = record<source: string, uri: string, bytes: int, lang: string, es: int, sample: string>
 type Item = record<group: string, bytes: int, lang: string>
 type Row = record<group: string, docs: int, mb: float, spanish: int, mixed: int, lean: int>
 
@@ -119,7 +119,8 @@ def tally [items: list<Item>]: nothing -> list<Row> {
 def main [docs: path, --out: path = '/tmp/rag-non-english.tsv', --check, --memories]: nothing -> nothing {
   let judged: list<Judged> = (open --raw $docs | lines | where {|l| not ($l | is-empty) } | each {|l|
     let d: Doc = ($l | from json)
-    {source: $d.source, uri: $d.uri, bytes: $d.bytes, lang: (language $d.sample $memories), sample: $d.sample}
+    let low: string = ($d.sample | str lowercase)
+    {source: $d.source, uri: $d.uri, bytes: $d.bytes, lang: (language $d.sample $memories), es: (count $low $ES), sample: $d.sample}
   })
   let bySource: list<Item> = ($judged | each {|j| {group: $j.source, bytes: $j.bytes, lang: $j.lang} })
   let byArea: list<Item> = ($judged | each {|j| {group: (area-of $j.uri), bytes: $j.bytes, lang: $j.lang} })
@@ -145,7 +146,13 @@ def main [docs: path, --out: path = '/tmp/rag-non-english.tsv', --check, --memor
   if $check {
     const PROSE: list<string> = ['md' 'txt' 'adoc' 'rst']
     let proseMix: list<Judged> = ($judged | where {|j| ($j.lang == 'mixed') and ((extension-of $j.uri) in $PROSE) })
-    let failed: list<Judged> = ($judged | where lang == 'spanish' | append $proseMix)
+    # In memories mode a row quoting a Spanish product label (a button, a
+    # command, a WhatsApp fragment) stays English: the gate only cuts Spanish
+    # PROSE, which means the document floor's eight stopwords.
+    let spanishProse: list<Judged> = ($judged | where {|j|
+      if $memories { $j.es >= 8 } else { $j.lang == 'spanish' }
+    })
+    let failed: list<Judged> = ($spanishProse | append $proseMix)
     if ($failed | is-not-empty) {
       print ($"ENGLISH CHECK: FAIL - ($failed | length) documents break ADR-009:")
       $failed | each {|j| print $"  ($j.lang)  ($j.uri)" }
