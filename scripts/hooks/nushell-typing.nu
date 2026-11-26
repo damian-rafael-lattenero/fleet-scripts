@@ -168,7 +168,7 @@ def main [--log: path = $DENIALS]: string -> nothing {
     let part1: string = (if ($looseBindings | is-empty) { '' } else { $"untyped bindings: ($looseBindings | first 4 | str join ', ') — annotate as `let n: int = ...` unless the type is evident on the line. " })
     let part2: string = (if ($proseLines | is-empty) { '' } else { $"possible LITERAL PARENS in interpolation — they are command calls: ($proseLines | str join ' ⏎ ') — escape them or drop the prose parens. " })
     let part3: string = (if $inLoop { 'polling loop detected — sleep inside while/loop: replace with `job recv --timeout` or `watch` (reactive, zero busy-wait).' } else { '' })
-    let part4: string = (if ($anonRecords | is-empty) { '' } else { $"deep anonymous record<...> in a signature — THE TYPE-ALIAS LAW (owner 22/11): name it with `type X = record<...>` (evidence: ($anonRecords | first | str trim | str substring 0..80)). " })
+    let part4: string = (if ($anonRecords | is-empty) { '' } else { $"deep anonymous record<...> in a signature — THE TYPE-ALIAS LAW, owner 22/11: name it with `type X = record<...>`. Evidence: ($anonRecords | first | str trim | str substring 0..80). " })
     let ctx: string = $"⚖️ Nushell law on ($file | path basename): ($part1)($part2)($part3)($part4)"
     { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: $ctx } } | to json -r | print
   }
