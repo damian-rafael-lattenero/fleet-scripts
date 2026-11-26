@@ -8,13 +8,28 @@
 /Users/lattenero/.zcode/hooks/design-guard.nu	detector input: live copy of the same keywords
 /Users/lattenero/.zcode/hooks/nushell-typing.nu	detector input: live copy of the same class
 # Rule 2 of the sweep contract — machine data.
-/Users/lattenero/Projects/whatsdigest-kt/sidecar	machine data: live WhatsApp session and stanzas
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/auth	machine data: live WhatsApp session
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/stanzas.jsonl	machine data: recorded stanzas
 /Users/lattenero/Projects/pg-base/backups	machine data: database backups
 # Rule 6 of the sweep contract — verbatim records.
 /Users/lattenero/Projects/git-diff-zcode.json	verbatim record: a captured diff
 /Users/lattenero/Projects/git-diff-zcode.transcript.md	verbatim record: a historical transcript
 # Rule 1 of the sweep contract — upstream content.
 /Users/lattenero/Projects/ZCode/third-party	upstream: vendored third-party licenses
+/Users/lattenero/Projects/ZCode/THIRD-PARTY-NOTICES.md	upstream: third-party notices (names)
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/adapters/tests	upstream: byte-encoding fixtures
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/core/src/runtime/helpers/runtime-reminders.ts	upstream: reply-language policy
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/core/tests/edit-tool-contract.test.ts	upstream: test fixture
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/core/tests/runtime-context-announcements.test.ts	upstream: test fixture
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/design-plugin	upstream: product skills
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/pdf-plugin	upstream: product skills
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/spreadsheets-plugin	upstream: product skills
+/Users/lattenero/Projects/ZCode/docs/i18n/agent-reply-language.md	upstream: reply-language policy
+/Users/lattenero/Projects/ZCode/docs/knip/docs/src/assets/testimonials.json	upstream: testimonials data
+/Users/lattenero/Projects/ZCode/docs/dynamic-workflow/presentation.md	upstream: product docs
+# Rule 3 — generated bundles.
+/Users/lattenero/Projects/agent-brain/brain-mcp/plugin/assets/ext-apps/app-with-deps.js	rule 3: generated MCP-app dependency bundle
+/Users/lattenero/Projects/ZCode/apps/zcode-cli/packages/core/src/tool/handlers/generated/bash-command-registry.ts	rule 3: generated registry
 # Rule 4 of the sweep contract — applied migration filenames are never renamed.
 /Users/lattenero/Projects/whatsdigest-kt/modules/db/docs/migrations	rule 4: applied migration filenames
 # Rule 1 and rule 6 — upstream samples and recorded proper names.
@@ -23,5 +38,13 @@
 /Users/lattenero/Projects/cv/content.tex	rule 6: employer legal name and city
 /Users/lattenero/Projects/cv/cv.tex	rule 6: employer legal names in a timeline comment
 /Users/lattenero/Projects/eri/cover_letter.md	rule 6: the author's legal name
-# Rule 3 — generated bundles.
-/Users/lattenero/Projects/agent-brain/brain-mcp/plugin/assets/ext-apps/app-with-deps.js	rule 3: generated MCP-app dependency bundle
+# Rule 6 — stored markers and es-locale fixtures in the whatsdigest sidecar.
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/README.md	rule 6: documents stored markers
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/src/domain/media.ts	rule 6: stored markers live in existing rows
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/src/effects/db.ts	rule 4: live SQL schema names
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/capture.test.ts	rule 6: es-locale fixture
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/chat-export.test.ts	rule 6: es-locale fixture
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/domain.test.ts	rule 6: accent and slug cases
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/handler.test.ts	rule 6: es-locale fixture
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/media-domain.test.ts	rule 6: stored markers
+/Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/text-gate.test.ts	rule 6: es-locale fixture
