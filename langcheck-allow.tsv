@@ -17,3 +17,9 @@
 /Users/lattenero/Projects/ZCode/third-party	upstream: vendored third-party licenses
 # Rule 4 of the sweep contract — applied migration filenames are never renamed.
 /Users/lattenero/Projects/whatsdigest-kt/modules/db/docs/migrations	rule 4: applied migration filenames
+# Rule 1 and rule 6 — upstream samples and recorded proper names.
+/Users/lattenero/Projects/cv/alta-sample.tex	rule 1: upstream AltaCV sample (fake accented names)
+/Users/lattenero/Projects/fp-kb/notes/dynamic-fp-discipline.md	rule 6: proper name in a citation (José Valim)
+/Users/lattenero/Projects/cv/content.tex	rule 6: employer legal name and city
+/Users/lattenero/Projects/cv/cv.tex	rule 6: employer legal names in a timeline comment
+/Users/lattenero/Projects/eri/cover_letter.md	rule 6: the author's legal name
