@@ -15,3 +15,5 @@
 /Users/lattenero/Projects/git-diff-zcode.transcript.md	verbatim record: a historical transcript
 # Rule 1 of the sweep contract — upstream content.
 /Users/lattenero/Projects/ZCode/third-party	upstream: vendored third-party licenses
+# Rule 4 of the sweep contract — applied migration filenames are never renamed.
+/Users/lattenero/Projects/whatsdigest-kt/modules/db/docs/migrations	rule 4: applied migration filenames
