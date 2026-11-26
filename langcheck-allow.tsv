@@ -48,3 +48,9 @@
 /Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/handler.test.ts	rule 6: es-locale fixture
 /Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/media-domain.test.ts	rule 6: stored markers
 /Users/lattenero/Projects/whatsdigest-kt/sidecar/tests/text-gate.test.ts	rule 6: es-locale fixture
+# Rule 6 — proper names in citations and a verbatim ASR quote.
+/Users/lattenero/Projects/theory-kb/notes/SOURCES.md	rule 6: author names in citations
+/Users/lattenero/Projects/theory-kb/notes/category-theory/INDEX.md	rule 6: author names in citations
+/Users/lattenero/Projects/theory-kb/notes/category-theory/category-theory-and-ai.md	rule 6: author names in citations
+/Users/lattenero/Projects/theory-kb/notes/category-theory/monoidal-functor.md	rule 6: author names in citations
+/Users/lattenero/Projects/zcode-plugin-research.md	rule 6: verbatim ASR quote with the English rendering above
