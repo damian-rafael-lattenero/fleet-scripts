@@ -13,6 +13,10 @@
 #    without an explicit `: Unit` infers the tail's type — a nullable tail
 #    makes the method not-void and JUnit silently SKIPS the test (measured in
 #    U8: a guard law that never ran). Declare `: Unit` or `runBlocking<Unit>`.
+# 4. THE IMMUTABILITY LAW (plan U13, rung 3): a `var` declaration added to a
+#    MAIN source is denied — bind `val` and produce a new value (a fold for
+#    accumulators, a persistent copy for updates, a holder for late wiring).
+#    TEST sources are exempt (fixtures and lateinit measured there).
 #
 # Scope honesty: the gate judges what the edit ADDS (Write: whole content;
 # Edit: new_string). Legacy mapOf translation tables are parse tables, not
@@ -58,7 +62,10 @@ export def findings-of [content: string]: nothing -> table<rule: string, name: s
         | parse -r '@Test\s+(?:override\s+)?fun\s+(?<name>\w+)\s*\([^)]*\)\s*=\s*(?<fam>runBlocking|runTest|runBlockingTest)\s*(?<gen><[^>]+>)?'
         | where {|row| ($row.gen | is-empty)}
         | each {|row| {rule: 'silent-skip-test', name: $row.name, kind: $row.fam}})
-    [$vocab $bangs $skips] | flatten
+    let vars: table<rule: string, name: string, kind: string> = ($code
+        | parse -r '\bvar\s+(?<name>[A-Za-z_]\w*)'
+        | each {|row| {rule: 'var-in-main', name: $row.name, kind: 'var'}})
+    [$vocab $bangs $skips $vars] | flatten
 }
 
 # The denial ledger: same shape and same law as the nushell hooks' (the row is
@@ -84,8 +91,16 @@ def main [--log: path = $DENIALS]: string -> nothing {
     let sid: string = ($payload | get -o session_id | default '')
 
     let hits: table<rule: string, name: string, kind: string> = (findings-of $added)
-    if ($hits | is-not-empty) {
-        let hit: Finding = ($hits | first)
+    # The immutability law's jurisdiction: test sources are exempt — fixtures
+    # and lateinit live there (measured: the var debt is mostly tests).
+    let isTest: bool = ($path | str contains '/src/test/')
+    let relevant: table<rule: string, name: string, kind: string> = (if $isTest {
+        $hits | where rule != 'var-in-main'
+    } else {
+        $hits
+    })
+    if ($relevant | is-not-empty) {
+        let hit: Finding = ($relevant | first)
         log-denial $log $sid 'kotlin-law' $hit.rule 'kotlin' $path
         match $hit.rule {
             'closed-vocabulary' => {
@@ -96,6 +111,9 @@ def main [--log: path = $DENIALS]: string -> nothing {
             }
             'silent-skip-test' => {
                 print -e $"⛔ The totality law, plan U12: ($hit.name) is an expression-bodied @Test without an explicit `: Unit` — the inferred tail type can be nullable, and a not-void JUnit method is SILENTLY SKIPPED, measured in U8: a guard law that never ran. Declare `fun ($hit.name): Unit = runBlocking { ... }` and end the block with an explicit Unit statement, or pin the type with `($hit.kind)<Unit> { ... }`."
+            }
+            'var-in-main' => {
+                print -e $"⛔ The immutability law, plan U13: ($hit.name) is a var declared in a MAIN source — mutable state is the bug budget. Bind `val` and produce a NEW value instead: a fold or reduce for accumulators, a persistent copy for updates, a holder class for late wiring. The fleet's own shape: state records snapshot without deep copies, so a new value costs nothing. Map: ~/Projects/kotlin-kb/notes/canon-map.md, section immutable-data."
             }
         }
         exit 2

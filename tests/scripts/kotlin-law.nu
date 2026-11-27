@@ -63,6 +63,23 @@ def main []: nothing -> nothing {
     let a9: table = (kotlin-law findings-of '@Test fun g() = runBlocking<Unit> { }')
     assert equal ($a9 | length) 0 "a pinned runBlocking<Unit> is the fix shape"
 
+    # ── rung 3: var in main sources ──
+    let v1: table = (kotlin-law findings-of 'fun parse(wire: String?): Int { var n = 0; return n }')
+    assert equal ($v1 | length) 1 "a local var declares a finding"
+    assert equal ($v1 | get 0.rule) 'var-in-main' "the var finding names its rule"
+
+    let v2: table = (kotlin-law findings-of 'private var count = 0')
+    assert equal ($v2 | length) 1 "a private var property denies"
+
+    let v3: table = (kotlin-law findings-of 'lateinit var client: HttpClient')
+    assert equal ($v3 | length) 1 "a lateinit var denies in main"
+
+    let a10: table = (kotlin-law findings-of 'fun f(vararg xs: String): Int = xs.size')
+    assert equal ($a10 | length) 0 "vararg is not a var declaration"
+
+    let a11: table = (kotlin-law findings-of 'val only = 1')
+    assert equal ($a11 | length) 0 "a val binds no finding"
+
     # ── the end-to-end deny: stdin payload -> exit 2 + ledger row ──
     let payload = {
         session_id: 'kotlin-law-test',
@@ -80,6 +97,17 @@ def main []: nothing -> nothing {
     assert equal ($rows | length) 1 "exactly one ledger row"
     assert ($rows | first | str contains 'closed-vocabulary') "the row names the rule"
 
+    # ── the exemption: the same var content in a TEST path passes ──
+    let testPayload = {
+        session_id: 'kotlin-law-test',
+        tool_input: {
+            file_path: '/tmp/proj/src/test/kotlin/ScratchVocab.kt',
+            content: "var fixtureState = 1\n",
+        },
+    }
+    let resTest: record = (do { $testPayload | to json -r | ^nu --stdin /Users/lattenero/Scripts/scripts/hooks/kotlin-law.nu --log $log } | complete)
+    assert equal $resTest.exit_code 0 "a var in a test source is exempt"
+
     # ── the census ──
     let files: list<string> = (do { ^rg --files --glob '*.kt' /Users/lattenero/Projects/agent-brain /Users/lattenero/Projects/zcode-bot-kotlin } | complete | get stdout | lines)
     let census: table = ($files
@@ -90,11 +118,13 @@ def main []: nothing -> nothing {
     let vocabOnly: list<string> = ($vocabSites | where {|r| ($r.rules | any {|x| $x == 'closed-vocabulary'})} | get file | sort)
     assert equal $vocabOnly ['BusEvent.kt' 'BusProducer.kt' 'MetricsInventory.kt'] "the vocabulary census stays at the three known files"
 
+    let mainFiles: table = ($census | where {|r| ($r.file | str contains '/src/main/')})
     let debt = {
         bang: ($census | each {|r| ($r.hits | where rule == 'force-unwrap' | length)} | math sum),
         skips: ($census | each {|r| ($r.hits | where rule == 'silent-skip-test' | length)} | math sum),
+        vars: ($mainFiles | each {|r| ($r.hits | where rule == 'var-in-main' | length)} | math sum),
     }
-    print $"kotlin-law census: vocabulary sites 3 of 3 pinned; live totality debt: ($debt.bang) force-unwraps, ($debt.skips) silent-skip tests — rerun prints the trend"
+    print $"kotlin-law census: vocabulary sites 3 of 3 pinned; live debt: ($debt.bang) force-unwraps, ($debt.skips) silent-skip tests, ($debt.vars) var in main sources — rerun prints the trend"
 
-    print "kotlin-law test: 16 cases + end-to-end + census green"
+    print "kotlin-law test: 21 cases + end-to-end + census green"
 }
