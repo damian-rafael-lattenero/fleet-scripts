@@ -31,4 +31,20 @@ if $probe.exit_code == 1 {
     assert ($pick.kind == "dmg" or ($pick.path | path exists)) $"dead candidate path: ($pick.path)"
 }
 
+# --print --version pins the answer to one version and stays hermetic: the local
+# candidate for that version answers with it, an absent version refuses with the
+# honest text. Neither path touches the network.
+let pinned: record = (do { ^nu $SCRIPT --print --version 4.0.0 } | complete)
+assert ($pinned.exit_code in [0 1]) $"unexpected exit ($pinned.exit_code): ($pinned.stderr)"
+if $pinned.exit_code == 0 {
+    let pinned_pick: record = ($pinned.stdout | from json)
+    assert ($pinned_pick.version == "4.0.0") $"pinned answer is ($pinned_pick.version), not 4.0.0"
+} else {
+    assert str contains $pinned.stderr "4.0.0" $pinned.stderr
+}
+
+let absent: record = (do { ^nu $SCRIPT --print --version 9.9.9 } | complete)
+assert ($absent.exit_code == 1) "an absent version refuses with exit 1"
+assert str contains $absent.stderr "9.9.9" $absent.stderr
+
 print "zcode-original structural ok — print path proven, app untouched"

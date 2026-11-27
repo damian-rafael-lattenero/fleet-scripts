@@ -21,10 +21,16 @@
 # attached. No sums published = no launch (an unverified 240 MB download is not
 # worth the risk). Offline or rate-limited = the newest local build launches.
 #
+# PINNED RUNS. `--version <v>` wants exactly one version: the local candidate
+# with that version, else that release from the feed (downloaded + verified
+# like any other). A pinned run never upgrades — newer builds are ignored on
+# purpose — which is how a claim is retried from an older client.
+#
 #   zcode-original              check → update if newer → launch
 #   zcode-original --check      local vs latest; exit 1 when an update exists
 #   zcode-original --no-update  skip the release feed, launch the newest local
 #   zcode-original --print      the local pick as JSON; no network, no effects
+#   zcode-original --version 3.18.2   launch exactly that version
 use ../lib/versions.nu *
 
 const DOWNLOADS: string = "/Users/lattenero/Downloads"
@@ -32,6 +38,7 @@ const BACKUP: string = "/Users/lattenero/zcode-official-backup"
 const VOLUMES: string = "/Volumes/ZCode*"
 const BUNDLE_ID: string = "dev.zcode.app"
 const FEED: string = "https://api.github.com/repos/zai-org/ZCode/releases/latest"
+const FEED_RELEASES: string = "https://api.github.com/repos/zai-org/ZCode/releases?per_page=30"
 
 # One launchable candidate. `key` is the version as a number (versions.nu);
 # `rank` breaks a tie between two sources of the SAME version: a mounted volume
@@ -60,11 +67,17 @@ def dmg-candidates []: nothing -> list<Candidate> {
     | each {|dmg| candidate $dmg "dmg" 1 ($dmg | path basename) }
 }
 
+# Every local candidate that carries a version; the input of both selections
+# (newest and pinned).
+def local-candidates []: nothing -> list<Candidate> {
+    (((mounted-candidates) ++ (backup-candidates) ++ (dmg-candidates)) | where key > 0)
+}
+
 # The newest official build on this Mac, or null when there is none. Only a
 # name that CARRIES a version can win (key > 0): an unversioned stray is never
 # "the latest".
 def newest []: nothing -> any {
-    let all: list<Candidate> = (((mounted-candidates) ++ (backup-candidates) ++ (dmg-candidates)) | where key > 0)
+    let all: list<Candidate> = (local-candidates)
     if ($all | is-empty) { return null }
     $all | sort-by key rank | last
 }
@@ -86,7 +99,7 @@ def arch-suffix []: nothing -> string {
 }
 
 # The latest published release for this arch, or null when the feed cannot be
-# read (offline, rate limit) or carries no mac artifact — the caller then
+# read (offline, rate limit) or carries no mac asset — the caller then
 # launches the newest LOCAL build, which is the honest degradation.
 def remote-release [arch: string]: nothing -> any {
     let run: record = (do { ^curl -fsSL --connect-timeout 10 --max-time 25 -H 'Accept: application/vnd.github+json' $FEED } | complete)
@@ -94,6 +107,34 @@ def remote-release [arch: string]: nothing -> any {
     let parsed: any = (try { $run.stdout | from json } catch { null })
     if $parsed == null { return null }
     release-of $parsed $arch
+}
+
+# The release whose version equals the request, from the feed's release page.
+# The comparison goes through version-of/version-key, so "3.18" and "3.18.0"
+# name the same release and a tag prefix ("v") is irrelevant. Null when the
+# feed cannot be read or carries no such release.
+def remote-release-by-version [arch: string, version: string]: nothing -> any {
+    let run: record = (do { ^curl -fsSL --connect-timeout 10 --max-time 30 -H 'Accept: application/vnd.github+json' $FEED_RELEASES } | complete)
+    if $run.exit_code != 0 { return null }
+    let parsed: any = (try { $run.stdout | from json } catch { null })
+    if $parsed == null { return null }
+    let want: int = (version-key (version-of $"zcode-($version)"))
+    $parsed
+    | each {|release| release-of $release $arch }
+    | where {|release| $release != null }
+    | where {|release| $release.key == $want }
+    | get --optional 0
+    | default null
+}
+
+# The pinned pick: the local candidate whose version equals the request (the
+# best rank wins), else the feed's release for it, else null. A pinned run
+# never upgrades — newer local or remote builds are ignored on purpose.
+def pick-pinned [candidates: list<Candidate>, remote: any, version: string]: nothing -> any {
+    let want: int = (version-key (version-of $"zcode-($version)"))
+    let local: any = ($candidates | where {|c| $c.key == $want } | sort-by rank | get --optional 0 | default null)
+    if $local != null { return $local }
+    $remote
 }
 
 # The downloaded file against the release's published sums: {ok, why}. Never
@@ -197,11 +238,21 @@ def attach [dmg: string]: nothing -> string {
     $mounts | last
 }
 
-def main [--print, --check, --no-update]: nothing -> nothing {
+def main [--print, --check, --no-update, --version: string = ""]: nothing -> nothing {
     let arch: string = (arch-suffix)
+    let pinned: string = ($version | str trim)
     let pick: any = (newest)
     # --print is hermetic: the gate proves this path, so it touches no network.
     if $print {
+        if not ($pinned | is-empty) {
+            let pinned_local: any = (pick-pinned (local-candidates) null $pinned)
+            if $pinned_local == null {
+                print -e $"no official ZCode ($pinned) among the local builds — mounted, staged or downloaded — run zcode-original --version ($pinned) without --print to fetch it from the feed."
+                exit 1
+            }
+            print ({version: $pinned_local.words, kind: $pinned_local.kind, path: $pinned_local.path} | to json)
+            return
+        }
         if $pick == null {
             print -e "no official ZCode found — nothing mounted, nothing staged in ~/zcode-official-backup, no ZCode*.dmg in ~/Downloads."
             exit 1
@@ -224,10 +275,22 @@ def main [--print, --check, --no-update]: nothing -> nothing {
         print $"local ($local) · latest ($remote.version) — up to date"
         return
     }
-    # The launch path: update first (a download never fights the running app),
-    # then the collision guard.
-    let freshest: any = (if $no_update { $pick } else { updated-pick $pick $arch })
+    # The launch path: a pinned run wants exactly one version and never
+    # upgrades; otherwise update first (a download never fights the running
+    # app), then the collision guard.
+    let freshest: any = (if not ($pinned | is-empty) {
+        let remote: any = (remote-release-by-version $arch $pinned)
+        pick-pinned (local-candidates) $remote $pinned
+    } else if $no_update {
+        $pick
+    } else {
+        updated-pick $pick $arch
+    })
     if $freshest == null {
+        if not ($pinned | is-empty) {
+            print -e $"no official ZCode ($pinned) — not mounted, not staged, not in ~/Downloads, and the feed carries no such release."
+            exit 1
+        }
         print -e "no official ZCode found — nothing mounted, nothing staged in ~/zcode-official-backup, no ZCode*.dmg in ~/Downloads, and the release feed answered nothing."
         exit 1
     }
