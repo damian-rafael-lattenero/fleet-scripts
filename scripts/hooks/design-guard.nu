@@ -25,7 +25,33 @@
 const LADDER: string = '🪜 DENOTATIONAL LADDER — design this, do not code it yet. (0) FORM FIRST: name the values and operations before any implementation; if the form is hard to say, the design is wrong. (1) THE MEANING: what does each type DENOTE, stripped of implementation? Say it in one sentence — that sentence becomes the file header ADR line. (2) THE EIGHT QUESTIONS — every answer is an existing stdlib piece, compose it, new code is the LAST resort: · can it fail → Result as VALUE (nushell-fp attempt/ok/err; Kotlin CE channel) — never thrown across logic, never null-probed · many shapes of one thing → ADT: tagged record + type alias (Opt/Res; Kotlin sealed) · dispatch on data → PRIORITY TABLE: predicate rows, payload closures AS THUNKS — rows pick the branch, only the winner pays · independent pieces → applicative parallelism (traverse-jobs / build-record-jobs; kap .with) · combining n things → monoid: define empty+combine, fold-map does the rest · expensive or conditional work → defer it (closures are thunks, lazy.nu; guards before builds; filter EARLY in pipelines) · effects → the EDGES only (complete records at the boundary, emit-to for the voice) — the core stays pure · external data → parse-don-t-validate: parse ONCE into tagged records; traverse-validated collects ALL errors. (3) THE HOMOMORPHISM CHECK: the meaning of the whole must follow from the meanings of the parts — a failing law is a DESIGN SIGNAL: redesign the denotation, never patch the code. (4) Then, and only then, code — minimal, typed, tested.'
 
 # The new-file extensions worth a Ladder (the fleet's source surfaces).
-const SOURCE_EXT: list<string> = [".nu" ".kt" ".kts" ".ts" ".tsx" ".mjs" ".js" ".py"]
+const SOURCE_EXT: list<string> = [".nu" ".kt" ".kts" ".ts" ".tsx" ".mjs" ".js" ".py" ".hs"]
+
+# The LIVE CANON (U9): at a Haskell design moment the Ladder is joined by the
+# Canon's own hits for the concept — rag-guard's job-budget mechanism, 5 s
+# deadline, fail-open (a slow brain delays no design). The words come from
+# the file's name: EitherAndErrors.hs queries "either errors law canon".
+const CANON_BIN: string = '/Users/lattenero/Projects/agent-brain/core/build/install/agent-brain/bin/agent-brain'
+const CANON_BUDGET: duration = 5sec
+
+def canon-hits [stem: string]: nothing -> string {
+    let words: string = ($stem | str replace -a -r '(?<=[a-z])(?=[A-Z])' ' ' | str lowercase)
+    let tag: int = (random int 1..100000)
+    let id: int = (job spawn --description 'design-guard canon query' {
+        ^$CANON_BIN query $"($words) law canon" --k 3 | complete | job send 0 --tag $tag
+    })
+    let run: record = (try { job recv --tag $tag --timeout $CANON_BUDGET } catch {
+        job kill $id
+        { exit_code: 124, stdout: '', stderr: 'deadline exceeded' }
+    })
+    let parsed: any = (try { $run.stdout | from json } catch { {} })
+    let hits: list<record> = ($parsed | get -o hits | default [])
+    let titles: list<string> = ($hits | each {|h| $"· ($h.title) — ($h.uri)" })
+    if ($titles | is-empty) { '' } else {
+        $"CANON NOW — top hits for this concept:
+($titles | str join "\n")"
+    }
+}
 
 # THE design-intent classifier, PURE (testable without a prompt): the
 # creation of a new artifact or an architecture/refactor ask. Bug fixes,
@@ -50,8 +76,9 @@ def design-intent? [prompt: string]: nothing -> bool {
     ($asks | any {|a| $p =~ $a })
 }
 
-def serve [event: string]: nothing -> nothing {
-    { hookSpecificOutput: { hookEventName: $event, additionalContext: $LADDER } } | to json -r | print
+def serve [event: string, canon: string = '']: nothing -> nothing {
+    let body: string = (if ($canon | is-empty) { $LADDER } else { $LADDER + "\n\n" + $canon })
+    { hookSpecificOutput: { hookEventName: $event, additionalContext: $body } } | to json -r | print
 }
 
 def selftest []: nothing -> nothing {
@@ -89,7 +116,16 @@ def main []: string -> nothing {
         # THE NEW-FILE MOMENT: the design fires when the module is BEING
         # BORN — an existing file's edit is write-time, the other halves'
         # territory
-        if $isSource and (not ($path | path exists)) { serve 'PreToolUse' }
+        if $isSource and (not ($path | path exists)) {
+            # U9: for a HASKELL module being born, the Canon speaks live —
+            # its top hits for the concept join the Ladder (5 s budget,
+            # fail-open: a slow brain delays no design). The other languages
+            # keep the static Ladder alone.
+            let canon: string = (if ($path | str ends-with '.hs') {
+                canon-hits ($path | path parse | get stem)
+            } else { '' })
+            serve 'PreToolUse' $canon
+        }
         exit 0
     }
     exit 0

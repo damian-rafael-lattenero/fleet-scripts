@@ -16,7 +16,9 @@ const QUERY_BUDGET: duration = 5sec
 def is-law [uri: string]: nothing -> bool {
   [
     ($uri | str contains '/fp-kb/')
-    ($uri | str contains '/nushell-kb/notes/')
+    # U9: EVERY KB's notes are law now — the old list named only nushell-kb,
+    # which left kotlin-kb, haskell-kb and theory-kb notes uninjected.
+    ($uri =~ '/[a-z]+-kb/notes/')
     ($uri =~ '/zcode-bot-kotlin/docs/runbook\.md')
     (($uri | str contains '/kap/') and ($uri =~ '\.md$'))
   ] | any {|x| $x }
