@@ -80,6 +80,32 @@ def main []: nothing -> nothing {
     let a11: table = (kotlin-law findings-of 'val only = 1')
     assert equal ($a11 | length) 0 "a val binds no finding"
 
+    # ── rung 5: the CE law ──
+    let c1: table = (kotlin-law findings-of "suspend fun go() { runCatching { client.query() }.getOrNull() }")
+    assert equal ($c1 | length) 1 "runCatching over a suspend call denies"
+    assert equal ($c1 | get 0.rule) 'ce-laundering' "the laundering finding names its rule"
+
+    let c2: table = (kotlin-law findings-of "runCatching { mutex.withLock { send() } }")
+    assert equal ($c2 | length) 1 "runCatching over withLock denies"
+
+    let c3: table = (kotlin-law findings-of "try { go() } catch (e: Exception) { log.warn(\"x\", e) }")
+    assert equal ($c3 | length) 1 "a wide Exception arm with no CE arm denies"
+
+    let c4: table = (kotlin-law findings-of "try { go() } catch (t: Throwable) { log.warn(\"x\", t) }")
+    assert equal ($c4 | length) 1 "a wide Throwable arm denies too"
+
+    let a12: table = (kotlin-law findings-of "catch (ce: CancellationException) throw ce\ntry { go() } catch (e: Exception) { log.warn(\"x\", e) }")
+    assert equal ($a12 | length) 0 "a fragment carrying the CE arm first is the fix shape"
+
+    let a13: table = (kotlin-law findings-of 'runCatching { Json.parseToJsonElement(raw) }.getOrNull()')
+    assert equal ($a13 | length) 0 "a pure parse conversion stays legal"
+
+    let a14: table = (kotlin-law findings-of 'catch (e: IOException) { return null }')
+    assert equal ($a14 | length) 0 "a narrow arm is not a wide catch"
+
+    let a15: table = (kotlin-law findings-of '// catch (e: Exception) { } in a comment stays prose')
+    assert equal ($a15 | length) 0 "a catch in a comment is never denied"
+
     # ── the end-to-end deny: stdin payload -> exit 2 + ledger row ──
     let payload = {
         session_id: 'kotlin-law-test',
@@ -123,8 +149,9 @@ def main []: nothing -> nothing {
         bang: ($census | each {|r| ($r.hits | where rule == 'force-unwrap' | length)} | math sum),
         skips: ($census | each {|r| ($r.hits | where rule == 'silent-skip-test' | length)} | math sum),
         vars: ($mainFiles | each {|r| ($r.hits | where rule == 'var-in-main' | length)} | math sum),
+        ce: ($mainFiles | each {|r| ($r.hits | where rule == 'ce-laundering' | length)} | math sum),
     }
-    print $"kotlin-law census: vocabulary sites 3 of 3 pinned; live debt: ($debt.bang) force-unwraps, ($debt.skips) silent-skip tests, ($debt.vars) var in main sources — rerun prints the trend"
+    print $"kotlin-law census: vocabulary sites 3 of 3 pinned; live debt: ($debt.bang) force-unwraps, ($debt.skips) silent-skip tests, ($debt.vars) var in main sources, ($debt.ce) ce-laundering sites — rerun prints the trend"
 
-    print "kotlin-law test: 21 cases + end-to-end + census green"
+    print "kotlin-law test: 29 cases + end-to-end + census green"
 }

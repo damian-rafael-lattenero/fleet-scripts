@@ -17,6 +17,15 @@
 #    MAIN source is denied — bind `val` and produce a new value (a fold for
 #    accumulators, a persistent copy for updates, a holder for late wiring).
 #    TEST sources are exempt (fixtures and lateinit measured there).
+# 5. THE CE LAW (plan U15, rung 5): CancellationException is a channel, never
+#    a value. DENIED in main sources: runCatching (or a bare
+#    `catch (e: Exception|Throwable)`) whose added fragment carries no
+#    CancellationException arm — over suspend code that launders cancellation
+#    into a value; the ladder is the CE arm FIRST, then the narrow arm, then
+#    the edge conversion (kap catching/settled). The measured census: the
+#    17/11 audit's 7 laundering sites are all fixed; the rule keeps them from
+#    coming back. Pure parse conversions (runCatching { json.parse... }) are
+#    the honest shape and stay legal.
 #
 # Scope honesty: the gate judges what the edit ADDS (Write: whole content;
 # Edit: new_string). Legacy mapOf translation tables are parse tables, not
@@ -65,7 +74,23 @@ export def findings-of [content: string]: nothing -> table<rule: string, name: s
     let vars: table<rule: string, name: string, kind: string> = ($code
         | parse -r '\bvar\s+(?<name>[A-Za-z_]\w*)'
         | each {|row| {rule: 'var-in-main', name: $row.name, kind: 'var'}})
-    [$vocab $bangs $skips $vars] | flatten
+    # The CE law: runCatching over a suspend-family call, or a wide catch arm
+    # with no CancellationException arm anywhere in the fragment. The suspend
+    # list is name-based and evidenced (the 17/11 audit's laundering shapes).
+    let ceArmed: bool = ($code =~ 'catch \(\w+: CancellationException\)')
+    let laundering: table<rule: string, name: string, kind: string> = (if $ceArmed {
+        []
+    } else {
+        let wrapping: table = ($code
+            | parse -r '(?s)runCatching\s*\{(?<body>[^}]{0,300})\}'
+            | where {|row| ($row.body =~ '\b(withContext|withLock|delay\(|await|\.call\(|client\.query|\.send\(|\.steer\()')}
+            | each {|row| {rule: 'ce-laundering', name: 'runCatching', kind: 'suspend-body'}})
+        let wide: table = ($code
+            | parse -r 'catch \(\w+: (?:Exception|Throwable)\)'
+            | each {|row| {rule: 'ce-laundering', name: 'catch Exception', kind: 'wide arm'}})
+        [$wrapping $wide] | flatten
+    })
+    [$vocab $bangs $skips $vars $laundering] | flatten
 }
 
 # The denial ledger: same shape and same law as the nushell hooks' (the row is
@@ -91,11 +116,11 @@ def main [--log: path = $DENIALS]: string -> nothing {
     let sid: string = ($payload | get -o session_id | default '')
 
     let hits: table<rule: string, name: string, kind: string> = (findings-of $added)
-    # The immutability law's jurisdiction: test sources are exempt — fixtures
-    # and lateinit live there (measured: the var debt is mostly tests).
+    # The immutability + CE laws' jurisdiction: test sources are exempt —
+    # fixtures, lateinit and test-time catching live there.
     let isTest: bool = ($path | str contains '/src/test/')
     let relevant: table<rule: string, name: string, kind: string> = (if $isTest {
-        $hits | where rule != 'var-in-main'
+        $hits | where rule in ['closed-vocabulary', 'force-unwrap', 'silent-skip-test']
     } else {
         $hits
     })
@@ -114,6 +139,9 @@ def main [--log: path = $DENIALS]: string -> nothing {
             }
             'var-in-main' => {
                 print -e $"⛔ The immutability law, plan U13: ($hit.name) is a var declared in a MAIN source — mutable state is the bug budget. Bind `val` and produce a NEW value instead: a fold or reduce for accumulators, a persistent copy for updates, a holder class for late wiring. The fleet's own shape: state records snapshot without deep copies, so a new value costs nothing. Map: ~/Projects/kotlin-kb/notes/canon-map.md, section immutable-data."
+            }
+            'ce-laundering' => {
+                print -e $"⛔ The CE law, plan U15: ($hit.name) over suspend code launders CancellationException into a value — the rescue leg then runs after the caller cancelled, and structured scopes hang or lose work. The ladder: the CancellationException arm rethrown FIRST, then the narrow arm, then the edge conversion, kap catching or settled. Pure parse conversions stay legal — runCatching over json.parse is honest. Companion: ~/Projects/fp-kb/notes/kotlin-error-taxonomy.md. Map: ~/Projects/kotlin-kb/notes/canon-map.md, section errors-as-values-in-coroutines."
             }
         }
         exit 2
