@@ -49,7 +49,7 @@ def verb-terms-of [text: string]: nothing -> list<string> {
     | default '# verb-homographs:'
     | str replace -a '# verb-homographs:' ''
     | split row ','
-    | each {|t| $t | str trim | str downcase }
+    | each {|t| $t | str trim | str lowercase }
     | where {|t| not ($t | is-empty) }
 }
 
