@@ -114,7 +114,7 @@ def term-used? [text: string, term: string, exempt: list<string>]: nothing -> bo
         | where {|f| $f != '' }
         | uniq
     )
-    let checked: list<string> = (if ($term | str downcase) in $exempt { [$term] } else { $forms })
+    let checked: list<string> = (if ($term | str lowercase) in $exempt { [$term] } else { $forms })
     $checked | any {|form|
         let pattern: string = ('(?i)(?<![A-Za-z0-9_-])' + ($form | str replace -a ' ' '\\s+') + '(?![A-Za-z0-9_-])')
         ($plain =~ $pattern)
