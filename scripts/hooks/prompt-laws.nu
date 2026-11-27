@@ -1,8 +1,15 @@
 #!/opt/homebrew/bin/nu
-# UserPromptSubmit: compact law on EVERY user prompt — replaces the owner repeating rules each step.
-# Static text, zero external calls: ~40 tokens per prompt.
+# RETIRED (U4, 27/11): the permanent laws now ride the system prompt itself.
+# The fork reads ~/.zcode/denotational-law.md (a symlink to agent-brain's
+# docs/denotational-law.md) into EVERY session — main and subagent — as its own
+# stable section, so this per-prompt injection has no work left. The file stays
+# as a registered no-op: the settings entry still points here, and a hook that
+# prints nothing cannot drift from the law.
+#
+# Receipt of the handover: a subagent of session sess_5a90dc11 quoted the law
+# verbatim from its system prompt, and its first Write was denied by the typing
+# hook (denials.tsv, sess_subagent_agent_24d52dec, 2026-11-27T00:49:34-03:00).
 
 def main []: string -> nothing {
-  let ctx: string = '⚖️ Permanent laws: ALL work output in ENGLISH (code, names, comments, docs, commits — conversation with the owner stays Spanish); consult brain rag_query BEFORE designing/refactoring non-trivial code (FP-KB: kap, denotational) and BEFORE writing any .nu (KB Nushell 0.116); the ZCode Bash tool IS Nushell — write Nu directly, NEVER wrap in `nu -c` (outside ZCode use `nu -c`/.nu scripts); web via serper only — SEARCH-FIRST: before reasoning from scratch, run a quick serper search and think over its results (99% of things are already answered); durable findings → permanent memory + RAG; commit+push per logical unit in your own worktree (--no-verify ONLY in the ZCode fork; every other repo pushes plain); disruptive actions (deploy, restart, kill) = ASK the owner first; CODE TASKS: REUSE/REFACTOR FIRST — before writing new code, reuse or reshape what exists; new code = minimum indispensable, every line justified + tested (fp-kb/notes/minimal-code-law.md); SHELL/.nu TASKS: nushell-fp FIRST — before writing any shell code, check the nushell-fp index (/Users/lattenero/Scripts/nushell-fp/README.md or rag_query with a nushell-fp pattern) and COMPOSE existing pieces (curry/uncurry ladders, apply-args, traverse-jobs, json get-in/set-in/deep-merge-all, Option/Result ADTs, monoids, human-num); new reusable fns land in nushell-fp mods/ with tests + their README index row in the SAME commit; new .nu traps go to nushell-kb/notes. GAP CHECK ORDER: 1) builtin (scope commands) 2) std-rfc module (iter/conversions/date/kv/path/pb/random — nushell-kb/notes/std-rfc-inventory.md) 3) nushell-fp README 4) then minimal new code. PARSE-DON-VALIDATE at boundaries: untrusted data entering a pipeline gets parsed ONCE into tagged records (some/ok via nushell-fp types.nu — traverse-validated collects ALL errors), never probed with mid-pipeline null-checks (fp-kb/notes/parse-don-t-validate-adts.md). FILES: Write/Edit on an existing file needs a full Read of it in THIS session first (ZCode rejects blind writes; the write-guard hook denies before the permission prompt) — after a reject: Read the exact path, then RESEND the same call unchanged, never recompose the content.'
-  { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: $ctx } } | to json -r | print
+  null
 }
