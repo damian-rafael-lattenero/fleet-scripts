@@ -1,30 +1,42 @@
 #!/opt/homebrew/bin/nu
-# zcode-original.nu — launch the NEWEST official ZCode on this Mac: the build
-# where the rewards are claimed. The fork and the official app share ONE bundle
+# zcode-original.nu — launch the NEWEST official ZCode: the build where the
+# rewards are claimed. It CHECKS the release feed, DOWNLOADS + verifies a newer
+# build, and only then launches. The fork and the official app share ONE bundle
 # id (dev.zcode.app), so only one can run — when the fork is up this REFUSES
-# instead of bouncing silently into it (measured 16/11).
+# instead of bouncing silently into it (measured 16/11 + 27/11).
 #
-# Candidates, ranked: a mounted official volume (usable now, and it outlives
-# the DMG it came from — measured 27/11: the 3.19.0 volume was still mounted
-# after its Downloads folder was deleted), then the staged official app in
-# ~/zcode-official-backup, then any ZCode*.dmg under ~/Downloads, attached on
-# demand. The VERSION decides, never the path (lib/versions.nu); the mount
-# point is READ from hdiutil, never guessed from the filename — the old guess
-# built "/Volumes/ZCode (3.19.0-arm64)" while the truth is "/Volumes/ZCode
-# 3.19.0-arm64", so the command launched nothing at all.
+# WHERE IT LOOKS. Local candidates are ranked by VERSION, never by path
+# (lib/versions.nu): a mounted /Volumes/ZCode* volume (usable now, and it
+# outlives the DMG it came from — the 3.19.0 volume survived its deleted
+# Downloads folder), the staged app in ~/zcode-official-backup, and any
+# ZCode*.dmg under ~/Downloads. The mount point is READ from hdiutil's table,
+# never guessed from the filename — the old guess built
+# "/Volumes/ZCode (3.19.0-arm64)" while the truth is "/Volumes/ZCode
+# 3.19.0-arm64", so it launched nothing at all.
 #
-#   zcode-original            launch the newest official build
-#   zcode-original --print    which build would launch; no side effects
+# WHERE IT UPDATES FROM. The GitHub release feed of zai-org/ZCode
+# (releases/latest): its mac artifact for this architecture plus SHA256SUMS.
+# A newer release is downloaded to ~/Downloads/zcode-official-<date>/, its
+# SHA256 checked against the published sums, and only a verified file is ever
+# attached. No sums published = no launch (an unverified 240 MB download is not
+# worth the risk). Offline or rate-limited = the newest local build launches.
+#
+#   zcode-original              check → update if newer → launch
+#   zcode-original --check      local vs latest; exit 1 when an update exists
+#   zcode-original --no-update  skip the release feed, launch the newest local
+#   zcode-original --print      the local pick as JSON; no network, no effects
 use ../lib/versions.nu *
 
 const DOWNLOADS: string = "/Users/lattenero/Downloads"
 const BACKUP: string = "/Users/lattenero/zcode-official-backup"
 const VOLUMES: string = "/Volumes/ZCode*"
 const BUNDLE_ID: string = "dev.zcode.app"
+const FEED: string = "https://api.github.com/repos/zai-org/ZCode/releases/latest"
 
 # One launchable candidate. `key` is the version as a number (versions.nu);
 # `rank` breaks a tie between two sources of the SAME version: a mounted volume
-# wins, then the staged app, then a DMG that still has to be attached.
+# wins, then the staged app, then a DMG that still has to be attached (a fresh
+# download outranks everything at its version).
 type Candidate = record<words: string, key: int, path: string, kind: string, rank: int>
 
 def candidate [path: string, kind: string, rank: int, name: string]: nothing -> Candidate {
@@ -60,6 +72,84 @@ def newest []: nothing -> any {
 def app-version [app: string]: nothing -> string {
     let read: record = (do { ^defaults read $"($app)/Contents/Info" CFBundleShortVersionString } | complete)
     $read.stdout | str trim
+}
+
+# The mac artifact suffix for THIS machine (the feed publishes arm64 and x64).
+def arch-suffix []: nothing -> string {
+    let probe: record = (do { ^uname -m } | complete)
+    let arch: string = ($probe.stdout | str trim)
+    match $arch {
+        "arm64" => "arm64"
+        "x86_64" => "x64"
+        _ => { print -e $"unsupported architecture: ($arch)"; exit 1 }
+    }
+}
+
+# The latest published release for this arch, or null when the feed cannot be
+# read (offline, rate limit) or carries no mac artifact — the caller then
+# launches the newest LOCAL build, which is the honest degradation.
+def remote-release [arch: string]: nothing -> any {
+    let run: record = (do { ^curl -fsSL --connect-timeout 10 --max-time 25 -H 'Accept: application/vnd.github+json' $FEED } | complete)
+    if $run.exit_code != 0 { return null }
+    let parsed: any = (try { $run.stdout | from json } catch { null })
+    if $parsed == null { return null }
+    release-of $parsed $arch
+}
+
+# The downloaded file against the release's published sums: {ok, why}. Never
+# trusts the network: a missing sums asset is a refusal, not a warning.
+def verify [file: string, asset: record]: nothing -> record<ok: bool, why: string> {
+    if ($asset.sums_url | is-empty) { return {ok: false, why: "the release publishes no SHA256SUMS"} }
+    let sums: record = (do { ^curl -fsSL --connect-timeout 10 --max-time 30 $asset.sums_url } | complete)
+    if $sums.exit_code != 0 { return {ok: false, why: "SHA256SUMS is unreachable"} }
+    let name: string = ($file | path basename | str replace -r '\.part$' '')
+    let want: string = (sha-of $sums.stdout $name)
+    if ($want | is-empty) { return {ok: false, why: $"SHA256SUMS has no entry for ($name)"} }
+    let have: record = (do { ^shasum -a 256 $file } | complete)
+    if $have.exit_code != 0 { return {ok: false, why: $"shasum failed on ($file)"} }
+    let got: string = ($have.stdout | split row ' ' | first | str lowercase)
+    if $got != $want { return {ok: false, why: $"SHA256 mismatch: published ($want), got ($got)"} }
+    {ok: true, why: "SHA256 verified"}
+}
+
+# Download the asset into a dated folder under ~/Downloads, verify it, and only
+# then let it carry the DMG name (a partial file can never be picked as a
+# candidate). A verified earlier copy is reused: a re-run must not re-download
+# 240 MB.
+def download-asset [asset: record]: nothing -> string {
+    let dir: string = ($DOWNLOADS | path join $"zcode-official-((date now | format date '%Y-%m-%d'))")
+    let name: string = ($asset.dmg_url | path basename)
+    let dest: string = ($dir | path join $name)
+    let part: string = $"($dest).part"
+    if ($dest | path exists) and (verify $dest $asset).ok { return $dest }
+    mkdir $dir
+    print $"downloading ZCode ($asset.version) — (($asset.size / 1_000_000) | math round) MB"
+    let pull: record = (do { ^curl -fL -sS --retry 2 --connect-timeout 20 --max-time 900 -o $part $asset.dmg_url } | complete)
+    if $pull.exit_code != 0 {
+        rm --force $part
+        print -e $"download failed: ($pull.stderr | str trim)"
+        exit 1
+    }
+    let checked: record = (verify $part $asset)
+    if not $checked.ok {
+        rm --force $part
+        print -e $"refusing the download — ($checked.why)"
+        exit 1
+    }
+    mv $part $dest
+    print $"verified + saved: ($dest)"
+    $dest
+}
+
+# The launch-path update: a newer published release replaces the local pick; an
+# equal-or-older feed (or an unreadable one) leaves the local pick in charge.
+def updated-pick [pick: any, arch: string]: nothing -> any {
+    let remote: any = (remote-release $arch)
+    if $remote == null { return $pick }
+    let have: int = (if $pick == null { 0 } else { $pick.key })
+    if $remote.key <= $have { return $pick }
+    let dmg: string = (download-asset $remote)
+    ({words: $remote.version, key: $remote.key, path: $dmg, kind: "dmg", rank: 4})
 }
 
 # The bundle root a running main process really lives in. `ps` is NOT enough:
@@ -107,26 +197,50 @@ def attach [dmg: string]: nothing -> string {
     $mounts | last
 }
 
-def main [--print]: nothing -> nothing {
+def main [--print, --check, --no-update]: nothing -> nothing {
+    let arch: string = (arch-suffix)
     let pick: any = (newest)
-    if $pick == null {
-        print -e "no official ZCode found — nothing mounted, nothing staged in ~/zcode-official-backup, no ZCode*.dmg in ~/Downloads. Download the official DMG first."
-        exit 1
-    }
+    # --print is hermetic: the gate proves this path, so it touches no network.
     if $print {
+        if $pick == null {
+            print -e "no official ZCode found — nothing mounted, nothing staged in ~/zcode-official-backup, no ZCode*.dmg in ~/Downloads."
+            exit 1
+        }
         print ({version: $pick.words, kind: $pick.kind, path: $pick.path} | to json)
         return
     }
+    # --check reports the two sides and nothing else; exit 1 = an update exists.
+    if $check {
+        let remote: any = (remote-release $arch)
+        let local: string = (if $pick == null { "none" } else { $pick.words })
+        if $remote == null {
+            print $"local ($local) · release feed unreachable — cannot tell whether an update exists"
+            return
+        }
+        if $remote.key > (if $pick == null { 0 } else { $pick.key }) {
+            print $"local ($local) · latest ($remote.version) — an update is available: run zcode-original"
+            exit 1
+        }
+        print $"local ($local) · latest ($remote.version) — up to date"
+        return
+    }
+    # The launch path: update first (a download never fights the running app),
+    # then the collision guard.
+    let freshest: any = (if $no_update { $pick } else { updated-pick $pick $arch })
+    if $freshest == null {
+        print -e "no official ZCode found — nothing mounted, nothing staged in ~/zcode-official-backup, no ZCode*.dmg in ~/Downloads, and the release feed answered nothing."
+        exit 1
+    }
     let running: list<string> = (running-bundles)
-    if ($pick.path in $running) {
-        print $"already running: ZCode ($pick.words) — ($pick.path)"
+    if ($freshest.path in $running) {
+        print $"already running: ZCode ($freshest.words) — ($freshest.path)"
         return
     }
     if not ($running | is-empty) {
         print -e $"ZCode is already running from ($running | first). The fork and the official build share the bundle id ($BUNDLE_ID), so opening the official one would bounce into it — quit ZCode and run this again."
         exit 1
     }
-    let mount: string = (if $pick.kind == "dmg" { attach $pick.path } else { $pick.path | path dirname })
+    let mount: string = (if $freshest.kind == "dmg" { attach $freshest.path } else { $freshest.path | path dirname })
     let bundle: string = ($mount | path join "ZCode.app")
     if not ($bundle | path exists) {
         print -e $"($mount) carries no ZCode.app — the image layout changed; hands needed."

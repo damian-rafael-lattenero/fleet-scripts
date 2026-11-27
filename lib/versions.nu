@@ -28,3 +28,40 @@ export def version-words [parts: list<int>]: nothing -> string {
     if ($parts | is-empty) { return "unknown" }
     $parts | each {|p| $p | into string } | str join "."
 }
+
+# One release (the parsed GitHub API body) → its mac artifact for one
+# architecture, as a value: {version, key, dmg_url, sums_url, size}. Null when
+# the release carries no such asset — a Windows-only release, a renamed
+# artifact, or a tag that is not a version. GitHub publishes the DMG as
+# "ZCode-<version>-mac-<arch>.dmg" and the checksums as "SHA256SUMS".
+export def release-of [release: record, arch: string]: nothing -> any {
+    let tag: string = ($release | get --optional tag_name | default "" | into string)
+    let parts: list<int> = (version-of $tag)
+    if ($parts | is-empty) { return null }
+    let words: string = (version-words $parts)
+    let assets: list<record> = ($release | get --optional assets | default [])
+    let want: string = $"ZCode-($words)-mac-($arch).dmg"
+    let dmg: any = ($assets | where {|a| ($a | get --optional name) == $want } | get --optional 0 | default null)
+    if $dmg == null { return null }
+    let sums: any = ($assets | where {|a| ($a | get --optional name) == "SHA256SUMS" } | get --optional 0 | default null)
+    ({
+        version: $words
+        key: (version-key $parts)
+        dmg_url: ($dmg | get --optional browser_download_url | default "" | into string)
+        sums_url: (if $sums == null { "" } else { $sums | get --optional browser_download_url | default "" | into string })
+        size: ($dmg | get --optional size | default 0 | into int)
+    })
+}
+
+# The published hash for one filename, from a SHA256SUMS body; "" when the file
+# has no entry. The GNU format is "<64 hex>  <name>" and the binary marker adds
+# a "*"; a malformed line simply never matches.
+export def sha-of [sums: string, filename: string]: nothing -> string {
+    let hits: list<string> = ($sums | lines
+        | parse -r '^(?<hash>[0-9a-fA-F]{64})\s+\*?(?<name>\S+)\s*$'
+        | where {|row| $row.name == $filename }
+        | get --optional hash
+        | default [])
+    if ($hits | is-empty) { return "" }
+    $hits | first | str lowercase
+}
