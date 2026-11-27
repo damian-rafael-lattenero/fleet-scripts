@@ -62,13 +62,31 @@ def app-version [app: string]: nothing -> string {
     $read.stdout | str trim
 }
 
-# The MAIN bundle processes only — "<bundle>/Contents/MacOS/ZCode", never a
-# helper — mapped back to their bundle root.
+# The bundle root a running main process really lives in. `ps` is NOT enough:
+# the app's argv[0] is the bare word "ZCode" (measured 27/11 — a path-based
+# probe saw nothing, the guard passed, and `open` bounced silently into the
+# fork), so the truthful source is the process's own text segment, which lsof
+# names as the executable's real path inside the bundle.
+def bundle-of [pid: string]: nothing -> string {
+    let run: record = (do { ^lsof -p $pid -a -d txt -Fn } | complete)
+    let hit: any = ($run.stdout | lines
+        | where {|line| $line =~ '/ZCode\.app/Contents/MacOS/ZCode$' }
+        | get --optional 0
+        | default null)
+    if $hit == null { return "" }
+    ($hit | str substring 1..) | path dirname | path dirname | path dirname
+}
+
+# Every running ZCode MAIN process (the helpers are named "ZCode Helper" and
+# never match), as bundle roots.
 def running-bundles []: nothing -> list<string> {
-    (^ps -axo args= | lines
-        | where {|line| $line =~ 'ZCode\.app/Contents/MacOS/ZCode(\s|$)' }
-        | each {|line| $line | split row '/Contents/MacOS/ZCode' | first }
-        | uniq)
+    let ps: record = (do { ^ps -axo pid=,comm= } | complete)
+    let pids: list<string> = ($ps.stdout | lines
+        | parse -r '^\s*(?<pid>\d+)\s+ZCode$'
+        | get --optional pid
+        | default []
+        | into string)
+    ($pids | each {|pid| bundle-of $pid } | where {|bundle| not ($bundle | is-empty) } | uniq)
 }
 
 # Attach the image and READ the mount point from hdiutil's own table — its
@@ -120,5 +138,11 @@ def main [--print]: nothing -> nothing {
         print -e $"open failed: ($opened.stderr | str trim)"
         exit 1
     }
-    print $"launched ZCode ($version) — ($bundle)"
+    # open's zero is NOT proof a launch happened (measured 27/11: a bounced
+    # open returns 0), so the receipt names what is actually up.
+    if ($bundle in (running-bundles)) {
+        print $"launched ZCode ($version) — ($bundle)"
+    } else {
+        print $"open accepted ($bundle) — no ($version) process is up yet; if nothing appears, quit the other ZCode and run this again."
+    }
 }
