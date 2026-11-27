@@ -38,6 +38,21 @@ def cards-of [text: string]: nothing -> list<Card> {
     } | where {|c| $c.id != 'G' }
 }
 
+# The glossary: term, tab, the card that introduces it. `#` lines are the law's own notes;
+# the note `# verb-homographs: a, b, c` names the terms whose -s forms are ordinary
+# English verbs, exempt from plural matching (data, not code — measured 27/11:
+# 12 of 18 mechanical plural findings were verbs: allows, turns, stops, asks, traps).
+def verb-terms-of [text: string]: nothing -> list<string> {
+    $text | lines
+    | where {|l| ($l | str trim | str starts-with '# verb-homographs:') }
+    | first
+    | default '# verb-homographs:'
+    | str replace -a '# verb-homographs:' ''
+    | split row ','
+    | each {|t| $t | str trim | str downcase }
+    | where {|t| not ($t | is-empty) }
+}
+
 # The glossary: term, tab, the card that introduces it. `#` lines are the law's own notes.
 def glossary-of [text: string]: nothing -> list<Term> {
     $text | lines
@@ -81,17 +96,33 @@ def resolve-cite [cite: string, projects: string, home: string]: nothing -> stri
 }
 
 # Whether a term appears in the card's prose (code spans and quotes are not read).
-def term-used? [text: string, term: string]: nothing -> bool {
-    let pattern: string = ('(?i)(?<![A-Za-z0-9_-])' + ($term | str replace -a ' ' '\\s+') + '(?![A-Za-z0-9_-])')
+# The PLURAL LAW (27/11, closing U3's documented hole): a plural slips the
+# singular's boundary check — `hook` never matches inside `hooks` — so the
+# term's mechanical plurals (s, es, y→ies) count as the term too. Bounded on
+# purpose: compounds like `tooling` or `gatekeeper` still never match.
+def term-used? [text: string, term: string, exempt: list<string>]: nothing -> bool {
     let plain: string = ($text
         | str replace -a -r '`[^`]*`' ''
         | str replace -a -r '"[^"]*"' ''
         | str replace -a -r "(?<![A-Za-z0-9])'[^']*'(?![A-Za-z0-9])" '')
-    ($plain =~ $pattern)
+    # The verb-homograph terms never plural-match: their -s forms are ordinary
+    # English verbs (the turn stops, which allows, the question asks, it never
+    # traps), not the concept. The list is DATA in the glossary file, not code.
+    let forms: list<string> = (
+        [$term, ($term + 's'), ($term + 'es')]
+        | append (if ($term | str ends-with 'y') { ($term | str substring 0..(($term | str length) - 2)) + 'ies' } else { '' })
+        | where {|f| $f != '' }
+        | uniq
+    )
+    let checked: list<string> = (if ($term | str downcase) in $exempt { [$term] } else { $forms })
+    $checked | any {|form|
+        let pattern: string = ('(?i)(?<![A-Za-z0-9_-])' + ($form | str replace -a ' ' '\\s+') + '(?![A-Za-z0-9_-])')
+        ($plain =~ $pattern)
+    }
 }
 
 # The laws one card breaks. `missing` is what the filesystem said about its paths.
-def findings-of [file: string, text: string, card: Card, expected: list<string>, order: record, terms: list<Term>, maxLines: int, maxWords: int, missing: list<string>]: nothing -> list<Finding> {
+def findings-of [file: string, text: string, card: Card, expected: list<string>, order: record, terms: list<Term>, verb_terms: list<string>, maxLines: int, maxWords: int, missing: list<string>]: nothing -> list<Finding> {
     let note: string = ($file | path basename)
     let seen: list<string> = (headings $text)
     let top: string = ($text | lines | first 6 | str join "\n")
@@ -103,7 +134,7 @@ def findings-of [file: string, text: string, card: Card, expected: list<string>,
     # headings are furniture, not teaching (the mandatory "Retrieval questions"
     # heading must not push a card past the glossary that introduces `retrieval`).
     let body: string = (prose $text | where {|l| not ($l | str starts-with '#') } | str join "\n")
-    let later: list<string> = ($terms | where {|t| (($order | get -o $t.card | default 9999) > $card.index) and (term-used? $body $t.term) } | each {|t| $t.term })
+    let later: list<string> = ($terms | where {|t| (($order | get -o $t.card | default 9999) > $card.index) and (term-used? $body $t.term $verb_terms) } | each {|t| $t.term })
     let minimum: string = (section-of $text 'Minimum path' | str join ' ' | str lowercase)
     let stops: list<string> = (['aha' 'signature' 'checkpoint'] | where {|w| not ($minimum | str contains $w) })
     let questions: int = (section-of $text '7 · Retrieval questions' | each {|l| $l | str trim } | where {|t| ($t =~ '^[123]\. ') } | length)
@@ -136,6 +167,7 @@ def main [
     let cards: list<Card> = (cards-of (open --raw $sheet))
     let expected: list<string> = (headings (open --raw $template))
     let terms: list<Term> = (if (($dir | path join $GLOSSARY) | path exists) { glossary-of (open --raw ($dir | path join $GLOSSARY)) } else { [] })
+    let verb_terms: list<string> = (if (($dir | path join $GLOSSARY) | path exists) { verb-terms-of (open --raw ($dir | path join $GLOSSARY)) } else { [] })
     let order: record = ($cards | reduce --fold {} {|c, acc| $acc | upsert $c.id $c.index })
     let duplicates: list<Finding> = ($cards | group-by id --to-table | where {|g| ($g.items | length) > 1 } | each {|g| {card: $SHEET, problem: ($"($g.id) is listed twice")} })
     let files: list<string> = (glob ($dir | path join '*.md') | where {|f| not (($f | path basename) in $NOT_CARDS) } | sort)
@@ -147,7 +179,7 @@ def main [
     })
     let unlisted: list<Finding> = ($written | where {|w| not ($w.stem in ($cards | get id)) } | each {|w| {card: ($w.file | path basename), problem: 'a card the route sheet does not list'} })
     let found: list<Finding> = ($written | where {|w| $w.stem in ($cards | get id) } | each {|w|
-        findings-of $w.file $w.text ($cards | where {|c| $c.id == $w.stem } | first) $expected $order $terms $max_lines $max_words $w.missing
+        findings-of $w.file $w.text ($cards | where {|c| $c.id == $w.stem } | first) $expected $order $terms $verb_terms $max_lines $max_words $w.missing
     } | flatten)
     let ids: list<string> = ($written | where {|w| $w.stem in ($cards | get id) } | get stem)
     let answersPath: path = ($dir | path join $ANSWERS)

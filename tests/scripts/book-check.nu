@@ -54,7 +54,7 @@ let goodMinimum: string = 'the aha, the signature, the checkpoint'
 put ($projects | path join 'thing' 'file.txt') 'x'
 put ($book | path join '_CARD_TEMPLATE.md') $TEMPLATE
 put ($book | path join '00-route-sheet.md') $SHEET
-put ($book | path join 'glossary.tsv') "monad\tB13\nretrieval\tC6\n"
+put ($book | path join 'glossary.tsv') "# verb-homographs: trap\nmonad\tB13\nretrieval\tC6\n"
 put ($book | path join 'G-answers.md') "## A0.1\nanswers\n"
 
 # 1. A clean card passes, and the three unwritten cards are pending.
@@ -105,6 +105,17 @@ put ($book | path join 'A0.1.md') (card (body 'Reads `thing/file.txt`. A monad i
 let early: Run = (fire $book $projects 150 100 true)
 assert equal $early.exit_code 1 'a term before its card is a finding'
 assert (findings $early | any {|f| $f | str contains 'uses a term before its card: monad' }) 'the finding names the term'
+
+# 7b. The PLURAL LAW (27/11): a plural carries the term early too — `monads`
+# before B13 flags — but a verb-homograph term's -s form is an ordinary verb
+# (it traps nothing) and never matches, exactly as the glossary's note says.
+put ($book | path join 'A0.1.md') (card (body 'Reads `thing/file.txt`. Monads everywhere in this prose.' $goodQuestions $goodMinimum))
+let plural: Run = (fire $book $projects 150 100 true)
+assert equal $plural.exit_code 1 'a plural term before its card is a finding'
+assert (findings $plural | any {|f| $f | str contains 'uses a term before its card: monad' }) 'the plural finding names the singular term'
+put ($book | path join 'A0.1.md') (card (body 'Reads `thing/file.txt`. The check traps nothing and harms no one.' $goodQuestions $goodMinimum))
+let verb: Run = (fire $book $projects 150 100 true)
+assert equal $verb.exit_code 0 $"a verb-homograph plural is not the term: ($verb.stdout)($verb.stderr)"
 
 # 8. The minimum path missing a stop.
 put ($book | path join 'A0.1.md') (card (body 'Reads `thing/file.txt`.' $goodQuestions 'the aha and the signature'))
