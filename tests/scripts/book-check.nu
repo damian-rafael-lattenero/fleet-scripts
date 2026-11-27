@@ -5,7 +5,8 @@
 # missing a stop, two questions instead of three, drifted headings, a card the
 # route sheet does not list, an answer key without the card's block, no key at
 # all, and an id listed twice. A listed id without a card is pending, not a
-# finding. Nothing touches the real book.
+# finding. Nothing touches the real book. Two clean cases pin the term law's
+# boundary: the template's own heading and a fenced example are not prose.
 # covers: /Users/lattenero/Scripts/scripts/book-check.nu
 use std/assert
 
@@ -53,7 +54,7 @@ let goodMinimum: string = 'the aha, the signature, the checkpoint'
 put ($projects | path join 'thing' 'file.txt') 'x'
 put ($book | path join '_CARD_TEMPLATE.md') $TEMPLATE
 put ($book | path join '00-route-sheet.md') $SHEET
-put ($book | path join 'glossary.tsv') "monad\tB13\n"
+put ($book | path join 'glossary.tsv') "monad\tB13\nretrieval\tC6\n"
 put ($book | path join 'G-answers.md') "## A0.1\nanswers\n"
 
 # 1. A clean card passes, and the three unwritten cards are pending.
@@ -62,6 +63,12 @@ let clean: Run = (fire $book $projects 150 100 false)
 assert equal $clean.exit_code 0 $"a clean card must pass: ($clean.stdout)($clean.stderr)"
 assert ($clean.stdout | str contains '1 written') 'the summary counts the written cards'
 assert ($clean.stdout | str contains '2 pending') 'ids without a card are pending'
+# The template's own heading carries a term (`retrieval`, C6): a heading is
+# furniture, not the card teaching the term, so the clean card still exits 0.
+# A fenced example is code, not prose: it does not put a term in the card's mouth.
+put ($book | path join 'A0.1.md') (card ((body 'Reads `thing/file.txt`.' $goodQuestions $goodMinimum) + "\n```nu\nmonad\n```\n"))
+let fenced: Run = (fire $book $projects 150 100 true)
+assert equal $fenced.exit_code 0 $"a fenced example is not prose: ($fenced.stdout)"
 
 # 2. The line cap.
 put ($book | path join 'A0.1.md') (card ((body 'Reads `thing/file.txt`.' $goodQuestions $goodMinimum) + ((0..29) | each {|i| '- filler' } | str join "\n")))

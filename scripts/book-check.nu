@@ -99,7 +99,11 @@ def findings-of [file: string, text: string, card: Card, expected: list<string>,
     let long: list<string> = (blocks $text | where {|b| (word-count $b) > $maxWords } | each {|b| $b | str substring 0..60 })
     let spanish: list<string> = (prose $text | each {|l| $l | str replace -a -r '`[^`]*`' '' | str replace -a -r '"[^"]*"' '' } | where {|l| spanish-line? $l } | each {|l| $l | str trim | str substring 0..60 })
     let clinical: list<string> = ($text | str lowercase | parse -r $CLINICAL | get -o w | default [] | uniq)
-    let later: list<string> = ($terms | where {|t| (($order | get -o $t.card | default 9999) > $card.index) and (term-used? $text $t.term) } | each {|t| $t.term })
+    # The term law reads the card's PROSE: fenced examples and the template's own
+    # headings are furniture, not teaching (the mandatory "Retrieval questions"
+    # heading must not push a card past the glossary that introduces `retrieval`).
+    let body: string = (prose $text | where {|l| not ($l | str starts-with '#') } | str join "\n")
+    let later: list<string> = ($terms | where {|t| (($order | get -o $t.card | default 9999) > $card.index) and (term-used? $body $t.term) } | each {|t| $t.term })
     let minimum: string = (section-of $text 'Minimum path' | str join ' ' | str lowercase)
     let stops: list<string> = (['aha' 'signature' 'checkpoint'] | where {|w| not ($minimum | str contains $w) })
     let questions: int = (section-of $text '7 · Retrieval questions' | each {|l| $l | str trim } | where {|t| ($t =~ '^[123]\. ') } | length)
