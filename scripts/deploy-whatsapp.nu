@@ -1,5 +1,5 @@
 #!/Users/lattenero/.local/bin/nu-nightly
-# zcode-whatsapp-kotlin-deploy.nu — the WhatsApp bot ONLY (whatsdigest):
+# deploy-whatsapp.nu — the WhatsApp bot ONLY (whatsdigest):
 # gradle build (+ detekt + tests) → install → LaunchAgent relaunch → its own
 # check. It NEVER touches the fork or the ZCode mirror bot.
 #
@@ -8,7 +8,7 @@
 # verifies the heartbeat.
 #
 # Golden rule: ONE deploy per change. If the fork and/or the mirror bot
-# changed too, zcode-deploy-all carries them together.
+# changed too, deploy-all carries them together.
 
 const NU: string = "/Users/lattenero/.local/bin/nu-nightly"
 const WHATSAPP_SCRIPT: string = "/Users/lattenero/Projects/whatsdigest-kt/scripts/deploy-daemon.nu"

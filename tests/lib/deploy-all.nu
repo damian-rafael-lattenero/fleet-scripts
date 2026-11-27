@@ -1,8 +1,8 @@
-# test_zcode_deploy_all.nu — the pure-core proofs for lib/zcode-deploy-all.nu:
+# deploy-all.nu — the pure-core proofs for lib/deploy-all.nu:
 # the POSIX quote, the leg body's parts, the wave plan (solo + chained track,
 # totality guard) and the status parse.
 use std/assert
-use ../../lib/zcode-deploy-all.nu *
+use ../../lib/deploy-all.nu *
 
 # 1. the quote: single quotes are escaped, everything is wrapped.
 assert equal (sh-quote "plain") "'plain'"
@@ -72,4 +72,4 @@ let runlog: string = (open --raw ($dir | path join "run.log"))
 assert str contains $runlog "[drill] fake running"
 ^rm -rf $dir
 
-print "test_zcode_deploy_all ok"
+print "lib/deploy-all ok"

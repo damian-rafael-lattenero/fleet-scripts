@@ -18,7 +18,7 @@ assert equal (((^readlink $FLEET | str trim) | path expand)) ($HUB | path join '
 # 2. every advertised verb answers a file on disk — the table cannot lie — and
 #    every script documents itself: `fleet list`'s description column is the
 #    script's own header paragraph, so a headerless script is a blank row.
-let rows: list<Command> = (verb-table (aliases $HUB $HC) (verbs (glob ($HUB | path join 'scripts' '*.nu'))))
+let rows: list<Command> = (verb-table (aliases $HC) (verbs (glob ($HUB | path join 'scripts' '*.nu'))))
 for r in $rows {
     assert equal ($r.script | path exists) true $"verb ($r.verb): missing script — ($r.script)"
     assert ($r.kind in ['script' 'alias']) $"verb ($r.verb): kind must be script or alias, got ($r.kind)"

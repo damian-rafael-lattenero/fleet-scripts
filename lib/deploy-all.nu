@@ -1,4 +1,4 @@
-# lib/zcode-deploy-all.nu — the pure core of zcode-deploy-all.nu: the POSIX
+# lib/deploy-all.nu — the pure core of deploy-all.nu: the POSIX
 # quote, the per-leg bash body, the scheduling plan as data (pnpm solo tracks
 # + one chained gradle track, with the totality guard) and the status-file
 # parse. The script keeps the mkdir/rm/bash effects.

@@ -1,11 +1,11 @@
-# wrappers.nu — the four thin deploy wrappers (bot, brain, fork, whatsapp)
-# carry no logic by design; their ONE invariant is structural: the canonical
-# script and the nu binary they invoke must EXIST. A moved canonical script
-# must fail the gate, not a deploy.
-# covers: /Users/lattenero/Scripts/scripts/zcode-bot-kotlin-deploy.nu
-# covers: /Users/lattenero/Scripts/scripts/zcode-brain-deploy.nu
-# covers: /Users/lattenero/Scripts/scripts/zcode-fork-deploy.nu
-# covers: /Users/lattenero/Scripts/scripts/zcode-whatsapp-kotlin-deploy.nu
+# wrappers.nu — the four thin deploy wrappers (deploy-bot, deploy-brain,
+# deploy-fork, deploy-whatsapp) carry no logic by design; their ONE invariant
+# is structural: the canonical script and the nu binary they invoke must
+# EXIST. A moved canonical script must fail the gate, not a deploy.
+# covers: /Users/lattenero/Scripts/scripts/deploy-bot.nu
+# covers: /Users/lattenero/Scripts/scripts/deploy-brain.nu
+# covers: /Users/lattenero/Scripts/scripts/deploy-fork.nu
+# covers: /Users/lattenero/Scripts/scripts/deploy-whatsapp.nu
 use std/assert
 
 const SELF: path = (path self)
@@ -19,8 +19,16 @@ def nu-refs [src: string]: nothing -> list<string> {
     $src | parse -r 'const NU: string = "(?<p>[^"]+)"' | get p
 }
 
-let wrappers: list<string> = (glob ($ROOT | path join "scripts" "zcode-*-deploy.nu"))
+# The explicit four (an orchestrator like deploy-all.nu shares the deploy-
+# prefix but is NOT a thin wrapper — it must never ride this gate).
+let wrappers: list<string> = [
+    ($ROOT | path join "scripts" "deploy-bot.nu" | into string)
+    ($ROOT | path join "scripts" "deploy-brain.nu" | into string)
+    ($ROOT | path join "scripts" "deploy-fork.nu" | into string)
+    ($ROOT | path join "scripts" "deploy-whatsapp.nu" | into string)
+]
 assert equal ($wrappers | length) 4 "the four wrappers are all present"
+assert ($wrappers | all {|w| $w | path exists}) "every wrapper file exists"
 
 for w in $wrappers {
     let name: string = ($w | path basename)

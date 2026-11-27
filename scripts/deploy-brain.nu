@@ -1,5 +1,5 @@
 #!/opt/homebrew/bin/nu
-# zcode-brain-deploy.nu — brain (agent-brain) ONLY: build (installDist +
+# deploy-brain.nu — brain (agent-brain) ONLY: build (installDist +
 # detekt) -> LaunchAgent restart -> verify /ready. The canonical script
 # lives in the repo (scripts/deploy-brain.nu); this wrapper ONLY invokes it.
 #

@@ -51,5 +51,6 @@ and `tests/scripts/census` verifies they point inside the hub.
    where its real format is the thing being pinned.
 5. A new script is a new verb: add `scripts/<name>.nu`, its test, and
    `fleet list` shows it — the door discovers the glob.
-6. The four `zcode-*-deploy.nu` wrappers carry no logic: their test is
-   structural (canonical script + nu binary must exist).
+6. The four thin deploy wrappers (`deploy-bot`, `deploy-brain`, `deploy-fork`,
+   `deploy-whatsapp`) carry no logic: their test is structural (canonical
+   script + nu binary must exist).

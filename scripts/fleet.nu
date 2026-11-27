@@ -4,9 +4,10 @@
 # instead of a path, so moving a script never breaks a caller again.
 #
 # Adding a script IS adding a verb: the table is a glob over scripts/*.nu plus
-# the five deploy verbs the owner's muscle memory knows and healthcheck (in
-# the skills tree). The pure half — discovery, the alias rows, the total
-# resolver — lives in lib/fleet.nu and is proven in tests/lib/fleet.nu.
+# healthcheck (the one explicit row — it lives in the skills tree; 27/11 the
+# five deploy wrappers were renamed to their verbs, so no alias twins remain).
+# The pure half — discovery, the alias row, the total resolver — lives in
+# lib/fleet.nu and is proven in tests/lib/fleet.nu.
 #
 # Exit code and stdio belong to the child: run-external inherits both and a
 # non-zero child ends this process with its exact code (measured 0.117).
@@ -34,7 +35,7 @@ def healthcheck-script []: nothing -> path {
 def verb-rows []: nothing -> list<Command> {
     let hub: path = (root)
     let files: list<string> = (glob ($hub | path join 'scripts' '*.nu'))
-    verb-table (aliases $hub (healthcheck-script)) (verbs $files)
+    verb-table (aliases (healthcheck-script)) (verbs $files)
 }
 
 # The listing is GENERATED from each script's own file (signature + header

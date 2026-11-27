@@ -1,5 +1,5 @@
 #!/Users/lattenero/.local/bin/nu-nightly
-# zcode-fork-deploy.nu — the ZCode fork ONLY (the app, not a bot): build
+# deploy-fork.nu — the ZCode fork ONLY (the app, not a bot): build
 # (~15 min, the app stays alive), CLOSES ZCode itself, swaps, reopens,
 # announces. The full arc, no ⌘Q.
 #
@@ -9,9 +9,8 @@
 # the close kills the open ZCode sessions — save anything mid-flight.
 #
 # Golden rule: ONE deploy per change. If only a bot changed, it is enough
-# with zcode-bot-kotlin-deploy (the ZCode mirror bot) or
-# zcode-whatsapp-kotlin-deploy (the WhatsApp bot); if several changed,
-# zcode-deploy-all.
+# with deploy-bot (the ZCode mirror bot) or deploy-whatsapp (the WhatsApp
+# bot); if several changed, deploy-all.
 #
 # BENIGN BUILD CHATTER (verified 10/11 — NOT an error, the build goes on):
 #   · "Some chunks are larger than 500 kB" + PLUGIN_TIMINGS — vite's web

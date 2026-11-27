@@ -1,5 +1,5 @@
 #!/Users/lattenero/.local/bin/nu-nightly
-# zcode-bot-kotlin-deploy.nu — the ZCode MIRROR bot ONLY: gradle build
+# deploy-bot.nu — the ZCode MIRROR bot ONLY: gradle build
 # (+ detekt + tests) → install → LaunchAgent relaunch → heartbeat check.
 # This bot carries the ZCode sessions to the phone.
 #

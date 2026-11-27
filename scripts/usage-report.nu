@@ -27,7 +27,7 @@ const SELF: path = (path self)
 
 def main [--days: int = 14, --top: int = 12]: nothing -> nothing {
     let hub: path = (($SELF | path expand) | path dirname | path dirname)
-    let commands: list<Command> = (verb-table (aliases $hub ($nu.home-dir | path join '.agents/skills/fleet-healthcheck/scripts/healthcheck.nu')) (verbs (glob ($hub | path join 'scripts' '*.nu'))))
+    let commands: list<Command> = (verb-table (aliases ($nu.home-dir | path join '.agents/skills/fleet-healthcheck/scripts/healthcheck.nu')) (verbs (glob ($hub | path join 'scripts' '*.nu'))))
     let names: list<string> = ($commands | get verb)
 
     let since: int = (((date now | format date '%s' | into int)) - ($days * 86400))

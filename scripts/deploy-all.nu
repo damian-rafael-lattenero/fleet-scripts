@@ -1,5 +1,5 @@
 #!/Users/lattenero/.local/bin/nu-nightly
-# zcode-deploy-all.nu — THE one command: a PARALLEL WAVE of the four legs
+# deploy-all.nu — THE one command: a PARALLEL WAVE of the four legs
 # (fork build+swap, brain, bot, whatsapp), and EVERY line of every leg
 # speaks LIVE, prefixed with its leg. The sequential version cost the SUM
 # (~25 min; the fork alone is 15-20); the wave costs the MAX.
@@ -42,12 +42,12 @@
 # fork, the brain's 7-layer health-check.
 #
 # Usage:
-#   zcode-deploy-all --dry-run    # the wave plan; no leg runs (verification)
-#   zcode-deploy-all              # the real wave (owner's call, from Ghostty)
+#   fleet deploy-all --dry-run    # the wave plan; no leg runs (verification)
+#   fleet deploy-all              # the real wave (owner's call, from Ghostty)
 
 const NU: string = "/Users/lattenero/.local/bin/nu-nightly"
 const LOGDIR: string = "/tmp/deploy-all"
-const LOG_FILE: string = "/Users/lattenero/Library/Logs/zcode-deploy-all.log"
+const LOG_FILE: string = "/Users/lattenero/Library/Logs/deploy-all.log"
 use /Users/lattenero/Scripts/nushell-fp/mods/log.nu *
 
 # One voice for stdout AND the run log — the wave's own receipt must survive
@@ -57,9 +57,9 @@ def emit [line: string]: nothing -> nothing {
 }
 
 # The shapes, the quote, the leg body, the wave plan and the status parse
-# ride lib/zcode-deploy-all.nu (tested). The union alias ("pnpm" | "gradle")
+# ride lib/deploy-all.nu (tested). The union alias ("pnpm" | "gradle")
 # does NOT parse yet (measured) — the LEGS rows carry the kind discipline.
-use ../lib/zcode-deploy-all.nu *
+use ../lib/deploy-all.nu *
 # kind = the RESOURCE the leg competes for (the scheduling policy is data,
 # not flow — measured 23/11: 3 gradle builds + pnpm at once pushed load to
 # 28 and the bot's 45s verification failed once). The pnpm track runs
