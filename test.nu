@@ -10,6 +10,7 @@
 #   nu ~/Scripts/test.nu --ci     hub + fp only (no machine paths, no symlinks,
 #                                 no config.nu — what a CI runner can prove)
 use lib/census.nu *
+use lib/run-nu.nu ide-errors
 
 const SELF: path = (path self)
 
@@ -42,7 +43,12 @@ def main [--ci]: nothing -> nothing {
 
     let bad: list<string> = (($scripts | append $modules | append $aux) | where {|m| not (nu-check $m)})
     if not ($bad | is-empty) {
-        error make {msg: ("nu-check failed: " + ($bad | str join ", "))}
+        # the offenders' own diagnostics, located (28/11: ide-check lists ALL
+        # parse errors, not just the first the caret would show)
+        let details: list<string> = ($bad | each {|m|
+            $"($m): ((ide-errors $m | str join ' | '))"
+        })
+        error make {msg: ("nu-check failed:\n" + ($details | str join "\n"))}
     }
 
     let runnable: list<string> = (if $ci {

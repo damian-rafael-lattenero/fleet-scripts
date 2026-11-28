@@ -64,4 +64,32 @@ assert equal (headline "  Error: nu::parser::unknown_flag") "Error: nu::parser::
 assert equal (headline "") ""
 assert equal (headline "just some output") ""
 
+# 9. ide-check, the pure half: diagnostics → located error lines, sorted by
+#    position, duplicates collapsed, non-Error rows dropped. The fixture
+#    spans pin the line:col math without spawning nu.
+let diagSrc: string = ("print (1 + )\nopen --zzz\nprint (1 + )")
+let diagFixtures: list<any> = [
+    {type: 'diagnostic', severity: 'Error', message: "The `open` command doesn't have flag `zzz`.", span: {start: 20, end: 21}}
+    {type: 'diagnostic', severity: 'Warning', message: 'a warn is dropped', span: {start: 5, end: 6}}
+    {type: 'diagnostic', severity: 'Error', message: 'Incomplete math expression.', span: {start: 9, end: 10}}
+    {type: 'diagnostic', severity: 'Error', message: 'Incomplete math expression.', span: {start: 33, end: 34}}
+    {type: 'diagnostic', severity: 'Error', message: 'Incomplete math expression.', span: {start: 33, end: 34}}
+]
+assert equal (locate-diags $diagFixtures $diagSrc) [
+    'line 1, col 11: Incomplete math expression.'
+    "line 2, col 9: The `open` command doesn't have flag `zzz`."
+    'line 3, col 11: Incomplete math expression.'
+]
+
+# 10. ide-check, the edge: a real broken file yields its real diagnostics;
+#     a known-clean fleet file yields [].
+let realBroken: path = ('/tmp/ide-errors-' + (random uuid) + '.nu')
+("print (1 " + "+ )") | save -f $realBroken
+let edge: list<string> = (ide-errors $realBroken)
+assert equal ($edge | length) 1
+assert ($edge | first | str contains 'Incomplete math expression') 'the edge reports the real diagnostic'
+let cleanLib: string = ($env.FILE_PWD | path dirname | path dirname | path join 'lib' 'run-nu.nu')
+assert equal (ide-errors $cleanLib) [] 'a clean file comes back empty'
+rm $realBroken
+
 print "test_run_nu ok"

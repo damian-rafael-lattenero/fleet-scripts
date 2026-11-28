@@ -53,4 +53,22 @@ assert equal ($again.stdout | str trim) '' 'the cooldown keeps the rerun silent'
 assert equal (ledger-count) $afterSpoken 'the rerun adds no ledger row'
 rm $broken
 
-print 'oracle-compile test: off duty silent, broken spoken, cooldown honored'
+# 4. THE NU LEG: a broken .nu file is spoken with located errors — and the
+#    immediate rerun SPEAKS AGAIN: the nu leg has no cooldown, a fix-edit
+#    changed the content and must be re-judged every time.
+let brokenNu: path = ('/tmp/oracle-broken-' + (random uuid) + '.nu')
+('print (1 ' + '+ )' + "\n" + 'open --z' + 'zz') | save -f $brokenNu
+let nuSpoken: record = (fire $'{tool_name: "Write", tool_input: {file_path: "($brokenNu)"}}')
+assert equal $nuSpoken.exit_code 0 'the nu oracle is advisory too: exit 0'
+let nuCtx: string = ($nuSpoken.stdout | from json | get hookSpecificOutput.additionalContext)
+assert ($nuCtx | str contains 'oracle-nu') 'the advisory names the leg'
+assert ($nuCtx | str contains 'does not parse') 'the nu advisory names the parse failure'
+assert ($nuCtx | str contains 'line 1') 'the errors carry locations'
+let afterNu: int = (ledger-count)
+let nuAgain: record = (fire $'{tool_name: "Write", tool_input: {file_path: "($brokenNu)"}}')
+let nuCtx2: string = ($nuAgain.stdout | from json | get hookSpecificOutput.additionalContext)
+assert ($nuCtx2 | str contains 'does not parse') 'the nu leg judges every write: no cooldown'
+assert equal ((ledger-count) - $afterNu) 1 'the rerun still lands exactly one row'
+rm $brokenNu
+
+print 'oracle-compile test: off duty silent, broken spoken, cooldown honored, nu uncooled'

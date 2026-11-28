@@ -113,6 +113,10 @@ def main [
     } else if not ($errors | is-empty) { ($errors | first).kind } else { '' })
     let gateHits: list<string> = (brain-suggest $gateSig)
 
+    # every parse error, located (28/11: nu-check gates, ide-check lists ALL
+    # diagnostics with line:col — the caret alone showed only the first)
+    let parseErrors: list<string> = (if not $parses { ide-errors $gateFile } else { [] })
+
     # layer 3: run unless blocked / --no-run
     let ran: bool = (not $blocked) and (not $no_run)
     let run: Captured = (if $ran {
@@ -135,6 +139,7 @@ def main [
     let report: record = {
         ok: (not $blocked and (not $failed))
         parse_ok: $parses
+        parse_errors: $parseErrors
         lint: $lint
         ran: $ran
         exit: (if $ran { $run.exit_code } else { null })
@@ -154,6 +159,10 @@ def main [
         if not $parses {
             print -e '── PARSE GATE FAILED ──'
             print -e ($caret.stderr | str trim)
+        }
+        if not ($parseErrors | is-empty) {
+            print -e '── all parse errors ──'
+            $parseErrors | each {|e| print -e $"  ($e)"}
         }
         if not ($lint | is-empty) {
             print -e '── lint ──'

@@ -128,3 +128,41 @@ export def headline [text: string]: nothing -> string {
     }
     ''
 }
+
+# ── ide-check: the static oracle (28/11, verified 0.117.0) ────────────────
+# `nu -n --ide-check 100 file` parses a file and returns EVERY diagnostic as
+# JSON Lines — a plain `nu` run reports only the first before exiting.
+# Parse-only (it never executes the file — proven with a side-effect file);
+# 12–36 ms on the fleet's files; exit 0 even with errors, so the JSON is the
+# verdict, never the exit code. It sees statically: undefined variables (top
+# level and inside defs), extra positionals, operator type mismatches,
+# unknown flags on builtins, missing modules, unclosed delimiters. It cannot
+# see: parse-legal unknown externals, pipeline input-type mismatches,
+# runtime errors (missing files, failed externals).
+
+# Diagnostics → located error lines. PURE: no process spawn, so tests pin
+# the math without nu. Sorted by position, duplicates collapsed, non-Error
+# rows dropped.
+export def locate-diags [diags: list<any>, src: string]: nothing -> list<string> {
+    $diags
+    | where {|d| ($d | get -o type) == 'diagnostic' and ($d | get -o severity) == 'Error' }
+    | sort-by {|d| $d.span?.start? | default 0 }
+    | each {|d|
+        let st: int = ($d | get -o span | default {} | get -o start | default 0)
+        let upto: string = ($src | str substring 0..$st)
+        $"line ($upto | lines | length), col (($upto | lines | last | str length) + 1): ($d.message)"
+    }
+    | uniq
+}
+
+# The EDGE: ide-check a file for real; its located errors, [] when clean.
+export def ide-errors [file: string]: nothing -> list<string> {
+    let run: record = (do { ^nu -n --ide-check 100 $file } | complete)
+    if $run.exit_code != 0 {
+        return [$"ide-check failed: ($run.stderr | str substring 0..120)"]
+    }
+    let diags: list<any> = ($run.stdout | lines | each {|l|
+        try { $l | from json } catch { null }
+    } | compact)
+    locate-diags $diags (open --raw $file)
+}
