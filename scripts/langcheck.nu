@@ -96,7 +96,10 @@ def main [...roots: string, --mode: string = 'all', --allow: path, --json, --lim
     if not ($mode in ['files' 'names' 'all']) {
         error make {msg: $"unknown --mode ($mode): use files, names or all"}
     }
-    let defaults: list<string> = [$'($home)/Projects' $'($home)/Scripts' $'($home)/evals']
+    # The memories root rides the defaults since 27/11 (owner order: the
+    # memory-notes folder sits under the English gate too; its baseline then
+    # was 803 flagged lines over 195 files — the translation is its own unit).
+    let defaults: list<string> = [$'($home)/Projects' $'($home)/Scripts' $'($home)/evals' $'($home)/.zcode/cli/memories']
     let chosen: list<string> = (if ($roots | is-empty) { $defaults } else { $roots })
     let effective: list<string> = ($chosen | path expand)
     let skip: list<string> = (if $include_worktrees { $SKIP | where {|s| $s != '/.worktrees/' } } else { $SKIP })
