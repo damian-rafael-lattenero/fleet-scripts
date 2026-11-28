@@ -255,5 +255,18 @@ for case in $clean {
     assert equal ((ledger-lines $ledger | length)) $before $"($case.name): an allow writes no ledger line"
 }
 
+# The event-bound warn (owner law 28/11): sleep-as-synchronization teaches
+# without blocking; the bare <= 2 s race gap stays silent; a long sleep still
+# denies. Warns never touch the ledger.
+let sync: record<exit_code: int, stderr: string> = (fire ($HUB | path join 'scripts' 'hooks' 'nushell-law.nu') (bash-payload ('sl' + 'eep 2sec; print done')) $ledger)
+assert equal $sync.exit_code 0 'the sync-sleep warn must not block'
+assert ($sync.stderr | str contains 'event-bound') 'the warn must name the event-bound law'
+let gap: record<exit_code: int, stderr: string> = (fire ($HUB | path join 'scripts' 'hooks' 'nushell-law.nu') (bash-payload ('sl' + 'eep 2sec')) $ledger)
+assert equal $gap.exit_code 0 'the bare race gap must stay legal'
+assert equal ($gap.stderr | str trim) '' 'the bare race gap must stay silent'
+let ledgerBefore: int = (ledger-lines $ledger | length)
+assert equal ((fire ($HUB | path join 'scripts' 'hooks' 'nushell-law.nu') (bash-payload ('sl' + 'eep 2sec; print done')) $ledger | get exit_code)) 0 'warns never deny'
+assert equal ((ledger-lines $ledger | length)) $ledgerBefore 'a warn writes no ledger line'
+
 rm -rf $tmp
 print $"scripts/denial-ledger ok — ($cases | length) denials logged and still enforced, ($clean | length) allows unlogged"

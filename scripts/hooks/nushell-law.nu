@@ -26,6 +26,11 @@
 #   test-bracket     — the bracket test : path exists
 #   caret-builtin    — the caret is for external binaries only
 #
+# WARN rows (teach, never block): sleep-sync — a sleep under 10 s followed by
+# more statements is the busy-wait shape; the event-bound law (fp-kb
+# event-bound-waits.md) wants job recv --timeout / wait-until / complete, and
+# the one exception is the <= 2 s mechanical race gap.
+#
 # Never silent on deny: stderr = the reason the model reads. The ledger gets
 # ONE line per deny; a failed ledger write never moves the verdict.
 # Proven by tests/scripts/denial-ledger.nu (the hooks run for real).
@@ -133,6 +138,25 @@ def deny-rules []: nothing -> list<DenyRule> {
   ]
 }
 
+# One warn row: the shape teaches, the allow still goes out.
+type WarnRule = record<name: string, when: closure, says: string>
+
+# The warn table: the busy-wait shapes the deny table cannot name without
+# breaking the measured <= 2 s race-gap exception. A sleep UNDER 10 s that is
+# NOT the last statement is synchronization by duration — warn with the
+# event-bound recipe.
+def warn-rules []: nothing -> list<WarnRule> {
+  [
+    {name: 'sleep-sync'
+     when: {|c: string|
+        let hit: bool = ($c =~ '(?i)\bsleep\s+[\d.]+\s*(?:seconds?|secs?|sec|m|minutes?|min|h|hrs?|hours?)\b')
+        let rest: string = ($c | parse -r '(?is)\bsleep\s+[\d.]+\s*[a-z]*\s*(?:;|\n)\s*(?<rest>.+)' | get -o 0.rest | default '' | str trim)
+        $hit and (not ($rest | is-empty))
+     }
+     says: "⚠️ Event-bound waits (owner law 28/11): a sleep followed by work is busy-waiting — time is never the synchronization mechanism. Subscribe instead: `job spawn` + `job recv --timeout` (onFinish = the value arrives; onError = the timeout raises, wrap in try/catch), `watch` for changes, `cmd | complete` for process exit, `wait-until deadline probe` for readiness. The one exception is a <= 2 s mechanical race gap as the LAST statement. Law: fp-kb/notes/event-bound-waits.md."}
+  ]
+}
+
 # double-quoted payload WITHOUT double backslash (unescape order is untractable; that case fails loud and gets fixed by hand)
 def transform-inline [cmd: string]: nothing -> record {
   let m: string = ($cmd | parse -r '(?s)^\s*nu\s+(?:-c|--commands)\s+"(?<payload>.+)"\s*$' | get -o 0.payload | default '')
@@ -164,6 +188,13 @@ def main [--log: path = $DENIALS]: string -> nothing {
       print -e $hit.says
     }
     exit 2
+  }
+
+  # The warn table speaks (stderr) but never blocks: the deny table had no
+  # hit, so this is an allow that teaches.
+  let warns: list<WarnRule> = (warn-rules | where {|r| try { do $r.when $cmd } catch { false } })
+  if not ($warns | is-empty) {
+    print -e (($warns | first | get says))
   }
 
   let t: record = (transform-inline $cmd)
