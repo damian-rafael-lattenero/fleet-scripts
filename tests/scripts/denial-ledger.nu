@@ -117,6 +117,84 @@ let cases: list<Case> = [
         rule: 'blind-sleep', language: 'shell', target: ''
         says: ('blind sl' + 'eep 30sec is FORBIDDEN')
     }
+    {
+        name: 'law: bash escape', hook: 'nushell-law.nu'
+        payload: (bash-payload "bash -c 'echo hi'")
+        rule: 'bash-escape', language: 'shell', target: "bash -c 'echo hi'"
+        says: 'nu-only law'
+    }
+    {
+        name: 'law: bad sleep unit', hook: 'nushell-law.nu'
+        payload: (bash-payload ('sl' + 'eep 5s; print 1'))
+        rule: 'bad-sleep-unit', language: 'shell', target: ('sl' + 'eep 5s; print 1')
+        says: 'is NOT a duration unit'
+    }
+    {
+        name: 'law: two inline lets', hook: 'nushell-law.nu'
+        payload: (bash-payload 'let a = 1; let b = 2; print ($a + $b)')
+        rule: 'two-lets', language: 'shell', target: 'let a = 1; let b = 2; print ($a + $b)'
+        says: 'SECOND binding'
+    }
+    {
+        name: 'law: bash redirect', hook: 'nushell-law.nu'
+        payload: (bash-payload 'git status 2>/dev/null')
+        rule: 'bash-redirect', language: 'shell', target: 'git status 2>/dev/null'
+        says: 'Bash redirects do not exist here'
+    }
+    {
+        name: 'law: literal dollar', hook: 'nushell-law.nu'
+        payload: (bash-payload 'echo "$HOME/x"')
+        rule: 'literal-dollar', language: 'shell', target: 'echo "$HOME/x"'
+        says: 'keeps the dollar LITERAL'
+    }
+    {
+        name: 'law: bash export', hook: 'nushell-law.nu'
+        payload: (bash-payload 'export FOO=1')
+        rule: 'bash-export', language: 'shell', target: 'export FOO=1'
+        says: 'the environment is'
+    }
+    {
+        name: 'law: bash exit code', hook: 'nushell-law.nu'
+        payload: (bash-payload 'echo $?')
+        rule: 'bash-exit-code', language: 'shell', target: 'echo $?'
+        says: 'LAST_EXIT_CODE'
+    }
+    {
+        name: 'law: sort -u', hook: 'nushell-law.nu'
+        payload: (bash-payload 'ls | sort -u')
+        rule: 'sort-uniq', language: 'shell', target: 'ls | sort -u'
+        says: 'nushell dedupes'
+    }
+    {
+        name: 'law: mkdir -p', hook: 'nushell-law.nu'
+        payload: (bash-payload 'mkdir -p a/b')
+        rule: 'mkdir-parents', language: 'shell', target: 'mkdir -p a/b'
+        says: 'parents implicitly'
+    }
+    {
+        name: 'law: for-do-done', hook: 'nushell-law.nu'
+        payload: (bash-payload 'for x in 1 2 3; do echo $x; done')
+        rule: 'for-do-done', language: 'shell', target: 'for x in 1 2 3; do echo $x; done'
+        says: 'nushell is `for x in'
+    }
+    {
+        name: 'law: then-fi', hook: 'nushell-law.nu'
+        payload: (bash-payload 'if true; then echo y; fi')
+        rule: 'then-fi', language: 'shell', target: 'if true; then echo y; fi'
+        says: 'blocks, no keywords'
+    }
+    {
+        name: 'law: bracket test', hook: 'nushell-law.nu'
+        payload: (bash-payload "grep '[ -f x' file")
+        rule: 'test-bracket', language: 'shell', target: "grep '[ -f x' file"
+        says: 'nushell asks the value'
+    }
+    {
+        name: 'law: caret builtin', hook: 'nushell-law.nu'
+        payload: (bash-payload '^str trim')
+        rule: 'caret-builtin', language: 'shell', target: '^str trim'
+        says: 'EXTERNAL binaries only'
+    }
 ]
 
 let clean: list<Clean> = [
@@ -124,6 +202,13 @@ let clean: list<Clean> = [
     {name: 'typing: not a .nu file', hook: 'nushell-typing.nu', payload: {tool_name: 'Edit', session_id: $SID, tool_input: {file_path: '/tmp/ledger-case/sample.md', new_string: 'let my-var = 1'}}}
     {name: 'lint: a clean write', hook: 'anti-pattern-lint.nu', payload: (write-payload 'Write' 'print "clean"')}
     {name: 'law: a clean command', hook: 'nushell-law.nu', payload: (bash-payload 'print "clean"')}
+    {name: 'law: one let is legal', hook: 'nushell-law.nu', payload: (bash-payload 'let r = (ls | complete); print $r.exit_code')}
+    {name: 'law: caret on an external is legal', hook: 'nushell-law.nu', payload: (bash-payload 'git -C /tmp status --short')}
+    {name: 'law: sh -c mid-command is the containers business', hook: 'nushell-law.nu', payload: (bash-payload "docker exec -i agent-brain-pg sh -c 'echo hi'")}
+    {name: 'law: a nu redirect is legal', hook: 'nushell-law.nu', payload: (bash-payload 'print hi e>| /dev/null')}
+    {name: 'law: env interpolation is legal', hook: 'nushell-law.nu', payload: (bash-payload 'print $"($env.HOME)/x"')}
+    {name: 'law: a dollar amount is legal', hook: 'nushell-law.nu', payload: (bash-payload 'print "costs $5"')}
+    {name: 'law: sleep with a real unit below 10s is legal', hook: 'nushell-law.nu', payload: (bash-payload ('sl' + 'eep 2sec'))}
 ]
 
 let tmp: path = ($"($env.TMPDIR? | default /tmp)/denial-ledger-(random uuid)")

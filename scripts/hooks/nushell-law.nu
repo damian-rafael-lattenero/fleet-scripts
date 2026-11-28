@@ -1,11 +1,34 @@
 #!/opt/homebrew/bin/nu
-# PreToolUse(Bash): TWO mechanical laws in one hook.
-# The Bash tool itself now runs Nushell (fork build 2026-11-17: nu -l -c), so a
-# plain Nu command needs NO wrapper: the old "must contain nu -c" check is gone.
-# 1) REACTIVE LAW: a blind sleep >= 10s is denied (job + mailbox or watch instead).
-# 2) PAREN-WRAPPED LET LAW: `(let x = ...)` is a parse error; use a .nu script.
-# The inline transform is kept for an explicit `nu -c "PAYLOAD"` (nested use).
-# Never silent on deny: stderr = the reason the model reads.
+# PreToolUse(Bash): the Bash tool's mechanical laws as ONE priority table.
+# The tool itself runs Nushell (fork build 2026-11-17: nu -l -c), so plain Nu
+# needs NO wrapper — and there is no bash to reach for (owner order 26/11:
+# "nu only"). Every row is a pattern that is NEVER valid nushell, or a law the
+# parser cannot teach; the first matching row denies and its message names the
+# nu form. Row order is precedence (the anti-patterns law: chains die, the
+# table lives in row order). The rows are the bash-habit translations of
+# nushell-kb/notes/bash-tool-laws.md — that note is their home.
+#
+# Rows (2026-11-27, owner order: prevent bash in all its forms, keep the good
+# habits, teach at the moment of the mistake):
+#   bash-escape      — bash/zsh -c anywhere (sh -c mid-command is a container's business)
+#   blind-sleep      — a blind sleep >= 10s (jobs + mailboxes instead)
+#   bad-sleep-unit   — a bare s is not a duration unit: it is 5sec
+#   paren-let        — a paren-wrapped let is ALWAYS a parse error
+#   two-lets         — a second inline binding means STOP: write a .nu file
+#   bash-redirect    — 2>/dev/null, 2>&1: the nu forms are out+err>, e>|, complete
+#   literal-dollar   — a double-quoted string keeps the dollar literal
+#   bash-export      — export F=1: the env is $env.F = 1
+#   bash-exit-code   — the bash exit-code variable: $env.LAST_EXIT_CODE
+#   sort-uniq        — sort -u : sort | uniq
+#   mkdir-parents    — mkdir -p : parents are implicit
+#   for-do-done      — for-in-do-done : for x in [...] { ... }
+#   then-fi          — then/fi blocks : if (cond) { ... }
+#   test-bracket     — the bracket test : path exists
+#   caret-builtin    — the caret is for external binaries only
+#
+# Never silent on deny: stderr = the reason the model reads. The ledger gets
+# ONE line per deny; a failed ledger write never moves the verdict.
+# Proven by tests/scripts/denial-ledger.nu (the hooks run for real).
 
 const DENIALS: path = '/Users/lattenero/.zcode/hooks/state/denials.tsv'
 
@@ -21,6 +44,9 @@ def log-denial [log: path, sid: string, hook: string, rule: string, language: st
     | save --append $log
   } catch { }
 }
+
+# One deny row: the pattern decides, the message teaches the nu form.
+type DenyRule = record<name: string, when: closure, says: string>
 
 # REACTIVE LAW: blind sleep >= 10s is forbidden (poll-less: job spawn/send/recv --timeout, or watch).
 # Short sleeps (< 10s) stay legal as measured retry-gaps (e.g. the launchd bootout->bootstrap 2s race gap).
@@ -54,6 +80,59 @@ def long-sleep [cmd: string]: nothing -> string {
   $offender
 }
 
+# The deny table, row order = precedence: bash escapes first, then the laws
+# the parser cannot teach, then the bash habits that are never valid nushell.
+# Each closure takes the command as its argument.
+def deny-rules []: nothing -> list<DenyRule> {
+  [
+    {name: 'bash-escape'
+     when: {|c: string| $c =~ '\b(bash|zsh)\s+-c\b' or $c =~ '(^|[;&|])\s*\^?sh\s+-c\b' }
+     says: "⛔ The nu-only law (owner 26/11): NEVER bash or zsh, not even the caret-escaped form. A POSIX tool is a DIRECT external (caret git, caret rg, caret python3 -c, caret psql); a block that grows becomes a .nu or .py FILE that nu runs. Retry in nushell."}
+    {name: 'bad-sleep-unit'
+     when: {|c: string| $c =~ '\bsleep\s+\d+s\b' }
+     says: "⛔ A bare `s` is NOT a duration unit — that sleep is a parse error. The unit is `sec` (ns, us, ms, sec, min, hr, day, wk): sleep 2sec."}
+    {name: 'blind-sleep'
+     when: {|c: string| (long-sleep $c) | is-not-empty }
+     says: "⛔ Reactive law: blind sleep is FORBIDDEN — be event-driven instead: `job spawn` + `job send 0` + `job recv --timeout` (the timeout raises; wrap in try/catch) or `watch` as an event stream. Full recipe: KB notes/reactive-jobs.md. Short sleeps below 10s remain legal as measured retry-gaps."}
+    {name: 'paren-let'
+     when: {|c: string| $c =~ '(?m)\(\s*let\b' }
+     says: ("⛔ Paren-wrapped `let` law: `let` is a statement in Nushell — (le" + "t x = ...) is ALWAYS a parse error. THE fix: keep `let` at top level; the moment a payload needs a second binding, STOP and write a .nu script file. Retry as a script.")}
+    {name: 'two-lets'
+     when: {|c: string| ($c | parse -r '(?i)(?:^|;)\s*(?:let|mut)\s' | length) >= 2 }
+     says: "⛔ One top-level `let` is fine inline; the moment a SECOND binding is needed, STOP — write a .nu script file (`nu script.nu`) and run that. Retry as a script."}
+    {name: 'bash-redirect'
+     when: {|c: string| $c =~ '\b[012]>(&[012]|/dev/null|/dev/)' }
+     says: "⛔ Bash redirects do not exist here: `cmd out+err> file` merges streams, `cmd e>|` discards stderr, and `cmd | complete` hands stdout, stderr and exit_code to you as VALUES."}
+    {name: 'literal-dollar'
+     when: {|c: string| $c =~ '"\$[A-Z({]' }
+     says: "⛔ A double-quoted string keeps the dollar LITERAL: \"v=$a\" prints v=$a. Interpolation is its own syntax — dollar-bracket-quote form — and the env is `$\"($env.HOME)/x\"`; a bash command-substitution is a value you compute first into a variable."}
+    {name: 'bash-export'
+     when: {|c: string| $c =~ '\bexport\s+[A-Za-z_][A-Za-z0-9_]*=' }
+     says: "⛔ `export F=1` is bash: here the environment is `$env.F = 1` (and it dies with the call — pass what a child needs explicitly)."}
+    {name: 'bash-exit-code'
+     when: {|c: string| $c =~ '\$\?' }
+     says: "⛔ The bash exit-code variable does not exist here: the code is `$env.LAST_EXIT_CODE` — or better, `cmd | complete` and read `.exit_code`."}
+    {name: 'sort-uniq'
+     when: {|c: string| $c =~ '\bsort\s+-[a-zA-Z]*u' }
+     says: "⛔ `sort -u` is bash: nushell dedupes with `sort | uniq` (or `sort-by` first for keyed sorts)."}
+    {name: 'mkdir-parents'
+     when: {|c: string| $c =~ '\bmkdir\s+-[a-zA-Z]*p' }
+     says: "⛔ `mkdir -p` is bash: nushell's `mkdir` makes parents implicitly and takes several dirs at once — `mkdir a/b c`."}
+    {name: 'for-do-done'
+     when: {|c: string| $c =~ '\bfor\s+\w+\s+in\b.*;\s*do\b' }
+     says: "⛔ for-in-do-done is bash: nushell is `for x in [1 2 3] { print $x }` — and a list plus `each` is usually clearer."}
+    {name: 'then-fi'
+     when: {|c: string| $c =~ ';\s*then\b' }
+     says: "⛔ `if …; then …; fi` is bash: nushell is `if (cond) { … } else { … }` — blocks, no keywords."}
+    {name: 'test-bracket'
+     when: {|c: string| $c =~ '\[\s*-[a-zA-Z]' }
+     says: "⛔ The bracket test is bash: nushell asks the value — `('x' | path exists)`, `($x == 'y')`, `($x | is-empty)`."}
+    {name: 'caret-builtin'
+     when: {|c: string| $c =~ '\^(str|into|split|get|select|save|lines|first|last|each|where|reduce|append|default|parse|describe|update|insert|upsert|flatten|skip|take|chunks|sort-by|group-by|any|all|wrap|transpose|scope|random|complete|ignore|table|hash|encode|decode|ansi|char|format|math|sort)\b' }
+     says: "⛔ The caret is for EXTERNAL binaries only (caret git, caret rg); nushell builtins are called bare — `str trim`, not caret str."}
+  ]
+}
+
 # double-quoted payload WITHOUT double backslash (unescape order is untractable; that case fails loud and gets fixed by hand)
 def transform-inline [cmd: string]: nothing -> record {
   let m: string = ($cmd | parse -r '(?s)^\s*nu\s+(?:-c|--commands)\s+"(?<payload>.+)"\s*$' | get -o 0.payload | default '')
@@ -73,21 +152,17 @@ def main [--log: path = $DENIALS]: string -> nothing {
   if ($cmd | is-empty) { exit 0 }
   let sid: string = ($payload | get -o session_id | default '')
 
-  let sl: string = (long-sleep $cmd)
-  if not ($sl | is-empty) {
-    log-denial $log $sid 'nushell-law' 'blind-sleep' 'shell' $cmd
-    print -e $"⛔ Reactive law: blind sleep ($sl) is FORBIDDEN — be event-driven instead: `job spawn` + `job send 0` + `job recv --timeout` — the timeout raises an error, wrap it in try/catch — or `watch` as an event stream. Full recipe: KB notes/reactive-jobs.md. Short sleeps below 10s remain legal as measured retry-gaps."
-    exit 2
-  }
-
-  # PAREN-WRAPPED LET LAW (owner's radical fix, 2026-11-08): `let` is a statement
-  # in Nushell — `(let x = ...)` is ALWAYS a parse error, and it kept recurring in
-  # multi-inspection `nu -c` blocks. THE unique solution: one top-level `let` is
-  # fine inline; the moment a payload needs a second binding — or a paren ever
-  # wraps a let — STOP and write a .nu script file instead.
-  if ($cmd =~ '(?m)\(\s*let\b') {
-    log-denial $log $sid 'nushell-law' 'paren-let' 'shell' $cmd
-    print -e "⛔ Paren-wrapped `let` law: `let` is a statement in Nushell — `(let x = ...)` is ALWAYS a parse error. THE fix: keep `let` at top level; the moment a `nu -c` payload needs a second binding, STOP and write a .nu script file (`nu scripts/x.nu`). Retry as a script."
+  # The table decides: the FIRST matching row denies, its message teaches.
+  let hits: list<DenyRule> = (deny-rules | where {|r| try { do $r.when $cmd } catch { false } })
+  if not ($hits | is-empty) {
+    let hit: DenyRule = ($hits | first)
+    log-denial $log $sid 'nushell-law' $hit.name 'shell' $cmd
+    if $hit.name == 'blind-sleep' {
+      let sl: string = (long-sleep $cmd)
+      print -e $"⛔ Reactive law: blind sleep ($sl) is FORBIDDEN — be event-driven instead: `job spawn` + `job send 0` + `job recv --timeout` — the timeout raises an error, wrap it in try/catch — or `watch` as an event stream. Full recipe: KB notes/reactive-jobs.md. Short sleeps below 10s remain legal as measured retry-gaps."
+    } else {
+      print -e $hit.says
+    }
     exit 2
   }
 
