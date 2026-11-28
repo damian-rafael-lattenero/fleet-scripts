@@ -83,3 +83,19 @@ export def delta-line [before: Prior, after: Prior]: nothing -> string {
         $after | option-match {|a| $"+($a.docs - $b.docs) docs · freshest ($a.freshest)" } {|| "?" }
     } {|| "?" }
 }
+
+# What one repair answered, shaped for the ladder: exit_code 0 and an empty
+# stderr when the repair ran clean, exit_code 1 and the message when it
+# raised. `complete` cannot shape a closure (it is external-only, measured
+# 27/11: the ladder died AFTER kickstarting the brain); try/catch is the one
+# shape that covers a repair ending in anything.
+export type RepairOutcome = record<exit_code: int, stderr: string>
+
+export def repair-outcome [repair: closure]: nothing -> RepairOutcome {
+    try {
+        do { do $repair }
+        {exit_code: 0, stderr: ''}
+    } catch {|e|
+        {exit_code: 1, stderr: ($e.msg | into string)}
+    }
+}

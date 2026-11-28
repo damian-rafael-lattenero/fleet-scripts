@@ -203,10 +203,9 @@ def ensure [layer: Layer, fix: bool]: nothing -> LayerProbe {
         return $before
     }
     emit $"🔧 ($layer.name) — ($before.detail) · repairing: ($layer.hint)"
-    let r: record = (do -i { do $layer.repair } | complete)
+    let r: RepairOutcome = (repair-outcome $layer.repair)
     if $r.exit_code != 0 {
-        let errText: string = (fold-stderr $r | str substring 0..200)
-        emit $"   repair raised: ($errText)"
+        emit $"   repair raised: ($r.stderr | str substring 0..200)"
     }
     let after: LayerProbe = (probe-it $layer)
     let mark: string = (if $after.ok { "✅" } else { "✗" })

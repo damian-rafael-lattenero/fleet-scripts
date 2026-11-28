@@ -75,4 +75,11 @@ assert equal (delta-line $stats (some {docs: 130, freshest: "2026-11-25"})) "+7 
 assert equal (delta-line (none) $stats) "?"
 assert equal (delta-line $stats (none)) "?"
 
+# 9. the repair outcome: a clean repair is exit 0; a raised error is exit 1
+#    with its message — complete cannot shape a closure (the 27/11 crash).
+assert equal (repair-outcome {|| 1 + 1 }) {exit_code: 0, stderr: ''}
+let boom: RepairOutcome = (repair-outcome {|| error make {msg: 'the container refused'} })
+assert equal $boom.exit_code 1
+assert ($boom.stderr | str contains 'the container refused')
+
 print "test_index_brain ok"
